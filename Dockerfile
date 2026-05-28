@@ -4,11 +4,13 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 # repo publishes — a release tag (recommended for reproducibility) or a
 # branch name (`main`) for bleeding edge.
 #
-# To bump: check https://github.com/NousResearch/hermes-agent/releases for the
-# newest tag (format `vYYYY.M.D`, e.g. `v2026.4.23`) and update the default
-# below. Use `main` only if you accept that every rebuild can pull arbitrary
-# new upstream commits.
-ARG HERMES_REF=v2026.5.16
+# This deployment pulls from Venture-Formations/hermes-agent (a fork of
+# NousResearch/hermes-agent) so we can carry the parallel_tool_calls fix
+# branch on top of upstream v2026.5.16 until it merges upstream. To revert
+# to vanilla upstream, change HERMES_REPO back to NousResearch/hermes-agent
+# and HERMES_REF to a tag from https://github.com/NousResearch/hermes-agent/releases.
+ARG HERMES_REPO=Venture-Formations/hermes-agent
+ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.16
 
 # tini = tiny init that we run as PID 1. Without it, hermes's grandchild
 # processes (MCP stdio servers, git, bun, browser daemons spawned by tools)
@@ -36,7 +38,7 @@ RUN apt-get update && \
 # this template actually uses so first-message latency is instant.
 # When bumping HERMES_REF, re-check hermes-agent's pyproject.toml [all] and
 # the extras below against the new release's pyproject.toml.
-RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent && \
+RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}.git /opt/hermes-agent && \
     cd /opt/hermes-agent && \
     uv pip install --system --no-cache -e ".[all,messaging,tts-premium,honcho,bedrock,anthropic,edge-tts,hindsight]" && \
     cd /opt/hermes-agent/web && \
