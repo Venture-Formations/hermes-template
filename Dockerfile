@@ -10,7 +10,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 # to vanilla upstream, change HERMES_REPO back to NousResearch/hermes-agent
 # and HERMES_REF to a tag from https://github.com/NousResearch/hermes-agent/releases.
 ARG HERMES_REPO=Venture-Formations/hermes-agent
-ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.16
+ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.28
 
 # tini = tiny init that we run as PID 1. Without it, hermes's grandchild
 # processes (MCP stdio servers, git, bun, browser daemons spawned by tools)
