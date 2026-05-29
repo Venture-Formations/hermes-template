@@ -1,0 +1,148 @@
+# CLAUDE.md — hermes-template (fork)
+
+You're working on the **Venture-Formations fork of praveen-ks-2001/hermes-agent-template**.
+This is the Docker wrapper that Railway deploys.
+
+## What this repo is
+
+A fork of [`praveen-ks-2001/hermes-agent-template`](https://github.com/praveen-ks-2001/hermes-agent-template) — a
+Railway-friendly Docker template that clones Hermes Agent, installs
+dependencies, builds the React dashboard, and runs the gateway.
+
+Lives at `Venture-Formations/hermes-template` on GitHub.
+Railway's deployed service watches the
+`deploy/venture-formations-fork` branch on this fork.
+
+## Why we forked
+
+Two reasons:
+
+1. We pin a forked Hermes Agent (`Venture-Formations/hermes-agent`)
+   instead of upstream. That requires the Dockerfile to point at our
+   repo URL.
+2. Generalising the `git clone` URL via an `ARG` makes future fork
+   switches a one-line Dockerfile change instead of a search-and-
+   replace.
+
+## Our changes — Dockerfile parameterisation
+
+We parameterised the `git clone` line in `Dockerfile`:
+
+```dockerfile
+# Before (upstream):
+ARG HERMES_REF=v2026.5.16
+RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent && \
+    ...
+
+# After (us):
+ARG HERMES_REPO=Venture-Formations/hermes-agent
+ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.28
+RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}.git /opt/hermes-agent && \
+    ...
+```
+
+To revert to vanilla upstream: set `HERMES_REPO=NousResearch/hermes-agent`
+and `HERMES_REF=<latest upstream tag>`.
+
+That's the only file we changed. Everything else (`server.py`,
+`start.sh`, `requirements.txt`, `railway.toml`, the `templates/`
+directory) is upstream.
+
+## Branch topology
+
+```
+main                              ← tracks upstream praveen-ks-2001
+deploy/venture-formations-fork   ← single 1-commit deploy branch,
+                                    contains the Dockerfile change
+                                    above. RAILWAY WATCHES THIS BRANCH.
+```
+
+## Upgrade procedure
+
+When **upstream Hermes Agent** ships a new tag and we've updated
+`Venture-Formations/hermes-agent` with a `fix/parallel-tool-calls-v<NEW>`
+branch:
+
+```bash
+git checkout deploy/venture-formations-fork
+# edit Dockerfile: change HERMES_REF to fix/parallel-tool-calls-v<NEW>
+git add Dockerfile && git commit -m "Dockerfile: bump HERMES_REF to v<NEW>"
+git push
+```
+
+Railway auto-detects the push and rebuilds. ~5 min build time, then
+healthcheck + swap.
+
+When **upstream template** ships improvements:
+
+```bash
+git fetch upstream
+git checkout deploy/venture-formations-fork
+git rebase upstream/main
+# resolve Dockerfile conflicts (our parameterisation vs their changes)
+git push --force-with-lease
+```
+
+Or, if the rebase looks messy, cherry-pick our Dockerfile change onto
+a fresh branch from `upstream/main` and re-deploy from that.
+
+## What's safe vs unsafe to modify
+
+✅ **Modify freely:**
+- `Dockerfile` `HERMES_REF` — bump when upgrading Hermes Agent.
+- `Dockerfile` `HERMES_REPO` — flip if we ever want to point at a
+  different fork (e.g. revert to upstream).
+- Our deploy branch metadata.
+
+⚠️ **Caution:**
+- Anything else in `Dockerfile` — those bits are upstream-managed and
+  rebases will conflict.
+- `server.py`, `start.sh`, `requirements.txt` — upstream-managed.
+
+❌ **Never:**
+- Modify `main` directly. `main` should always be a clean mirror of
+  `praveen-ks-2001/hermes-agent-template:main`.
+
+## How Railway picks up changes
+
+- Railway service: `Hermes Agent` in project `talented-education`.
+- Source: `Venture-Formations/hermes-template`, branch
+  `deploy/venture-formations-fork`.
+- Trigger: every push to the watched branch fires a new deployment.
+- Build: Docker, ~5 min on the SFO Metal builder.
+- Healthcheck: `/health` endpoint, 5 min retry window.
+- Swap: old container stays serving until new one passes healthcheck.
+
+## How to verify the right thing is deployed
+
+```bash
+# 1. Confirm the deployed branch
+railway service info --json | jq '.source'
+# expect: {"repo": "Venture-Formations/hermes-template"}
+
+# 2. Confirm the deployed Hermes version
+railway service files download \
+  /opt/hermes-agent/pyproject.toml /tmp/pyproject.toml
+grep -E '^version|^name' /tmp/pyproject.toml
+# expect:
+#   name = "hermes-agent"
+#   version = "0.15.0"   ← matches whichever HERMES_REF is set
+```
+
+## Upstream notes
+
+- Upstream repo: `praveen-ks-2001/hermes-agent-template`
+- This template is a Railway deployment helper around vanilla
+  NousResearch/hermes-agent. Not officially maintained by Nous.
+- We could in theory upstream the `HERMES_REPO` parameterisation as
+  a PR. The user decided to hold it pending other priorities — see
+  workspace `CHANGELOG.md`.
+
+## For full deployment context
+
+See `Venture-Formations/hermes-workspace`:
+
+- `CLAUDE.md` — deployment-wide overview
+- `CHANGELOG.md` — every change since gbrain install
+- `UPGRADING_GBRAIN.md` — Hermes/gbrain upgrade procedure
+- `OPERATIONS_LOG.md` — infra history
