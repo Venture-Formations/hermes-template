@@ -126,7 +126,7 @@ railway service files download \
 grep -E '^version|^name' /tmp/pyproject.toml
 # expect:
 #   name = "hermes-agent"
-#   version = "0.15.1"   ← matches whichever HERMES_REF is set
+#   version = "0.15.2"   ← matches whichever HERMES_REF is set
 ```
 
 ## Upstream notes
