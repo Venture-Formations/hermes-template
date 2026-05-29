@@ -35,4 +35,40 @@ fi
 # container), so removing the file unconditionally is safe.
 rm -f /data/.hermes/gateway.pid
 
+# --- gbrain autopilot bootstrap (canonical ephemeral-container launch) -----
+# gbrain is baked into the image at /usr/local/bun/bin (see Dockerfile). On
+# Railway, gbrain detects an ephemeral container (RAILWAY_ENVIRONMENT is set)
+# and its canonical launch mechanism is:
+#   1. `gbrain autopilot --install` writes ~/.gbrain/start-autopilot.sh
+#   2. the agent's bootstrap runs `bash ~/.gbrain/start-autopilot.sh` on every
+#      container start, which nohup-backgrounds the autopilot supervisor.
+# Refs (github.com/garrytan/gbrain @ master):
+#   - skills/setup/SKILL.md Phase C.5 ("gbrain autopilot --install ... On
+#     ephemeral containers (Render / Railway / Fly / Docker): writes
+#     ~/.gbrain/start-autopilot.sh").
+#   - src/commands/autopilot.ts installEphemeralContainer() — emits the
+#     `bash <scriptPath>` one-liner and nohup-launches the wrapper (non-blocking).
+# We pass --no-inject because we are NOT OpenClaw; we launch the daemon
+# explicitly below instead of having gbrain edit a bootstrap hook.
+# This block is idempotent (install is safe to re-run; the start script
+# re-launches the daemon each boot) and strictly non-fatal: any failure is
+# logged and must never block the gateway from starting. `set -e` is disabled
+# for the block so a gbrain hiccup can't take the whole container down.
+(
+  set +e
+  if command -v gbrain >/dev/null 2>&1; then
+    echo "[gbrain] $(gbrain --version 2>/dev/null) — installing autopilot (ephemeral-container, --no-inject)"
+    gbrain autopilot --install --no-inject 2>&1 | sed 's/^/[gbrain] /'
+    if [ -f "$HOME/.gbrain/start-autopilot.sh" ]; then
+      echo "[gbrain] launching autopilot daemon via $HOME/.gbrain/start-autopilot.sh"
+      bash "$HOME/.gbrain/start-autopilot.sh" 2>&1 | sed 's/^/[gbrain] /' || \
+        echo "[gbrain] WARN: start-autopilot.sh exited non-zero; continuing without autopilot"
+    else
+      echo "[gbrain] WARN: ~/.gbrain/start-autopilot.sh not found after --install; skipping daemon launch"
+    fi
+  else
+    echo "[gbrain] WARN: gbrain not on PATH; skipping autopilot bootstrap"
+  fi
+) || true
+
 exec python /app/server.py

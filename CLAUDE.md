@@ -138,6 +138,33 @@ grep -E '^version|^name' /tmp/pyproject.toml
   a PR. The user decided to hold it pending other priorities — see
   workspace `CHANGELOG.md`.
 
+## gbrain topology (binary durability)
+
+gbrain is now **baked into the Docker image**, not installed at runtime.
+
+- **Binary path:** `/usr/local/bun/bin/gbrain`. The Dockerfile installs Bun
+  with `BUN_INSTALL=/usr/local/bun` and runs `bun install -g
+  github:garrytan/gbrain` (the canonical install — see gbrain
+  `INSTALL_FOR_AGENTS.md` Step 1 and `docs/operations/headless-install.md`
+  Pattern 1). `/usr/local/bun/bin` is on `PATH`, and a `gbrain --version`
+  smoke check fails the build if the ref is unresolvable.
+  - This **replaces the old ephemeral `/opt/bun/bin` assumption**, where
+    gbrain lived on a path that vanished on every Railway rebuild.
+- **Autopilot daemon at boot:** `start.sh` runs gbrain's canonical
+  ephemeral-container launch before `exec python /app/server.py`:
+  `gbrain autopilot --install --no-inject` writes
+  `~/.gbrain/start-autopilot.sh` (Railway is detected as an
+  ephemeral container via `RAILWAY_ENVIRONMENT`; see gbrain
+  `skills/setup/SKILL.md` Phase C.5 and
+  `src/commands/autopilot.ts` `installEphemeralContainer`), then
+  `bash "$HOME/.gbrain/start-autopilot.sh"` nohup-launches the autopilot
+  supervisor. We pass `--no-inject` because we are **not** OpenClaw — we
+  launch the daemon explicitly rather than letting gbrain edit a bootstrap
+  hook. The block is idempotent and strictly non-fatal: a gbrain failure is
+  logged and never blocks the gateway.
+- Autopilot self-supervises (it forks/restarts the Minions worker), so no
+  external watchdog cron is needed.
+
 ## For full deployment context
 
 See `Venture-Formations/hermes-workspace`:

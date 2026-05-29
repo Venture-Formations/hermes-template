@@ -61,6 +61,30 @@ RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}
 # - We keep ui-tui/ entirely (node_modules + dist + src) so HERMES_TUI_DIR
 #   can point at it (see below).
 
+# --- gbrain binary durability (image-baked) ------------------------------
+# Canonical install path: gbrain is a Bun + TypeScript runtime, so Bun is a
+# hard prerequisite and the only supported global-install mechanism is
+# `bun install -g github:garrytan/gbrain`.
+#   - INSTALL_FOR_AGENTS.md Step 1 (github.com/garrytan/gbrain @ master):
+#       curl -fsSL https://bun.sh/install | bash
+#       export PATH="$HOME/.bun/bin:$PATH"
+#       bun install -g github:garrytan/gbrain
+#   - docs/operations/headless-install.md Pattern 1 ("RUN bun install -g
+#       github:garrytan/gbrain") — the supported Docker/CI install.
+#
+# We bake it into the image rather than installing at runtime so the binary
+# survives every Railway deploy (the old /opt/bun/bin assumption put gbrain
+# on an ephemeral path that vanished on rebuild). Bun installs to a stable,
+# world-readable prefix (/usr/local/bun) via BUN_INSTALL so PATH resolution
+# is deterministic regardless of $HOME.
+ENV BUN_INSTALL=/usr/local/bun
+ENV PATH="/usr/local/bun/bin:$PATH"
+RUN curl -fsSL https://bun.sh/install | bash && \
+    bun install -g github:garrytan/gbrain && \
+    # Smoke check — fail the build loudly if the gbrain ref is unresolvable
+    # (Step 1: "gbrain --version should print a version number").
+    gbrain --version
+
 COPY requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
