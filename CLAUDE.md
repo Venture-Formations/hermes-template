@@ -44,17 +44,33 @@ RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}
 To revert to vanilla upstream: set `HERMES_REPO=NousResearch/hermes-agent`
 and `HERMES_REF=<latest upstream tag>`.
 
-That's the only file we changed. Everything else (`server.py`,
-`start.sh`, `requirements.txt`, `railway.toml`, the `templates/`
-directory) is upstream.
+The clone-line parameterisation was our **first** change, but it is no
+longer the only one. The deploy branch has since grown additional VF
+customizations (detailed in the sections below):
+
+- **`Dockerfile`** — the `HERMES_REPO`/`HERMES_REF` params above, plus the
+  **gbrain binary bake** (`bun install -g github:garrytan/gbrain` →
+  `/usr/local/bun`, with `unzip` added to apt) and the **youtube-collector
+  deps** (`yt-dlp` + `ffmpeg`, baked for the `youtube-playlist-sync` cron).
+- **`start.sh`** — the **gbrain autopilot bootstrap** block (runs
+  `gbrain autopilot --install --no-inject` + launches the daemon before
+  `exec python /app/server.py`).
+
+Files VF has **not** modified — `server.py`, `requirements.txt`,
+`railway.toml`, `templates/` — remain upstream. (They can still show a diff
+against the latest `praveen-ks-2001/main` simply because this branch hasn't
+rebased onto upstream's newer commits, not because VF edited them.)
 
 ## Branch topology
 
 ```
 main                              ← tracks upstream praveen-ks-2001
-deploy/venture-formations-fork   ← single 1-commit deploy branch,
-                                    contains the Dockerfile change
-                                    above. RAILWAY WATCHES THIS BRANCH.
+                                    (clean mirror; NO VF customizations)
+deploy/venture-formations-fork   ← the deployed branch (MULTI-commit, not
+                                    a single commit): HERMES_REPO/REF params
+                                    + version bumps, gbrain bake + youtube
+                                    deps in Dockerfile, gbrain autopilot in
+                                    start.sh. RAILWAY WATCHES THIS BRANCH.
 ```
 
 ## Upgrade procedure
@@ -95,9 +111,13 @@ a fresh branch from `upstream/main` and re-deploy from that.
 - Our deploy branch metadata.
 
 ⚠️ **Caution:**
-- Anything else in `Dockerfile` — those bits are upstream-managed and
-  rebases will conflict.
-- `server.py`, `start.sh`, `requirements.txt` — upstream-managed.
+- Upstream-template parts of `Dockerfile` (base image, hermes-agent
+  clone/build, TUI prebuild) — upstream-managed; rebases will conflict.
+- The `Dockerfile` **gbrain-bake** and **youtube-deps** blocks, and the
+  `start.sh` **gbrain autopilot bootstrap** block — VF additions. Preserve
+  them across rebases (they live alongside upstream content in those files).
+- `server.py`, `requirements.txt`, `railway.toml`, `templates/` —
+  upstream-managed; VF has not modified these.
 
 ❌ **Never:**
 - Modify `main` directly. `main` should always be a clean mirror of

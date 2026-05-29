@@ -87,6 +87,24 @@ RUN curl -fsSL https://bun.sh/install | bash && \
     # (Step 1: "gbrain --version should print a version number").
     gbrain --version
 
+# --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
+# The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
+# cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-
+# fallback audio chunking). Its preflight (`skills/youtube-playlist-sync/
+# script.ts` requireTool over ["yt-dlp","ffmpeg","git"]) hard-fails the cron if
+# either is missing — the dashboard symptom is
+# "Script exited with code 1 stderr: [fatal] Required tool not found on PATH: yt-dlp".
+# The slim base ships neither, so bake them into the image (durable across
+# Railway rebuilds — same rationale as the gbrain bake above). yt-dlp via uv to
+# the --system prefix (latest: YouTube changes break stale builds); ffmpeg via apt.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    uv pip install --system --no-cache yt-dlp && \
+    # Smoke check — fail the build loudly if either tool is unresolvable,
+    # mirroring the gbrain --version gate above.
+    yt-dlp --version && ffmpeg -version | head -1
+
 COPY requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
