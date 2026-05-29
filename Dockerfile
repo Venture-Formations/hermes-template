@@ -23,8 +23,10 @@ ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.29.2
 #
 # Node.js is required only at build time to compile the Hermes React dashboard.
 # We strip the source + apt lists afterwards to keep the image lean.
+# unzip is required by the Bun installer (curl https://bun.sh/install | bash)
+# used below for the gbrain bake — the slim base image does not ship it.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates git tini && \
+    apt-get install -y --no-install-recommends curl ca-certificates git tini unzip && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
