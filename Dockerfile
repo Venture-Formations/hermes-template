@@ -81,8 +81,16 @@ RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}
 # is deterministic regardless of $HOME.
 ENV BUN_INSTALL=/usr/local/bun
 ENV PATH="/usr/local/bun/bin:$PATH"
+# gbrain ships via master (no GitHub release tags), so we pin a specific master
+# commit for reproducible builds. Bumping this ARG also busts Docker's layer
+# cache for the install below, forcing a fresh pull on upgrade.
+# Current: v0.42.1.0 — master @ 2026-05-31, commit eefe8b5 (skillopt / self-
+# evolving skills + the facts/hot-memory + RLS lineage). To upgrade: set
+# GBRAIN_REF to the new master sha, push this branch, then run `gbrain
+# post-upgrade` + verify-upgrade.sh on the container (UPGRADING_GBRAIN.md §0).
+ARG GBRAIN_REF=eefe8b5741c2
 RUN curl -fsSL https://bun.sh/install | bash && \
-    bun install -g github:garrytan/gbrain && \
+    bun install -g github:garrytan/gbrain#${GBRAIN_REF} && \
     # Smoke check — fail the build loudly if the gbrain ref is unresolvable
     # (Step 1: "gbrain --version should print a version number").
     gbrain --version
