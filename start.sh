@@ -144,9 +144,14 @@ RLSEOF
   set +e
   if command -v gbrain >/dev/null 2>&1; then
     echo "[gbrain-serve] launching HTTP MCP server on :8787 (public https://gbrain.ventureformations.com/mcp)"
+    # --enable-dcr: claude.ai (and other hosted MCP clients) self-register via
+    # RFC 7591 Dynamic Client Registration; gbrain disables it by default.
+    # Safe because the /authorize consent is gated by GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+    # (set as a Railway service var) — open registration, owner-gated approval.
     GBRAIN_HTTP_TRUST_PROXY="${GBRAIN_HTTP_TRUST_PROXY:-1}" \
       nohup gbrain serve --http --bind 0.0.0.0 --port 8787 \
         --public-url https://gbrain.ventureformations.com \
+        --enable-dcr \
         > /tmp/gbrain-serve.log 2>&1 &
     echo "[gbrain-serve] pid $! — logs at /tmp/gbrain-serve.log"
   else
