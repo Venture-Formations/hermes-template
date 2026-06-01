@@ -35,6 +35,63 @@ fi
 # container), so removing the file unconditionally is safe.
 rm -f /data/.hermes/gateway.pid
 
+# --- gbrain boot-task runner (Railway-MCP-drivable; no `railway ssh` needed) --
+# Container-side gbrain maintenance you can trigger purely through the Railway
+# MCP (which has no exec/ssh tool): set the GBRAIN_BOOT_TASK service variable
+# (set_variables) -> Railway redeploys -> this block runs the task on boot and
+# prints [gbrain-boot-task] lines to stdout -> read them with get_logs. This is
+# the MCP-only substitute for `railway ssh "gbrain ..."`.
+#
+# Set GBRAIN_BOOT_TASK=post-upgrade *persistently* to self-heal on every rebuild
+# (so the daily GBRAIN_REF bump becomes end-to-end). All tasks are idempotent:
+# post-upgrade is a no-op when migrations are current; `ALTER ... ENABLE RLS` on
+# an already-protected table is a no-op; doctor is read-only. Runs BEFORE the
+# autopilot daemon launches so schema DDL happens on a quiet DB (no lock
+# contention). Strictly non-fatal — never blocks the gateway.
+(
+  set +e
+  if [ -n "${GBRAIN_BOOT_TASK}" ] && command -v gbrain >/dev/null 2>&1; then
+    btlog() { echo "[gbrain-boot-task] $*"; }
+    btlog "task=${GBRAIN_BOOT_TASK} starting"
+    cd /data/brain 2>/dev/null || cd /data
+    case "${GBRAIN_BOOT_TASK}" in
+      post-upgrade|selfheal)
+        # 3-min cap: this runs before the gateway, and Railway's healthcheck
+        # window is ~5 min — a hung post-upgrade must never block boot. A real
+        # upgrade is fast; if a huge migration ever needs longer, the next boot
+        # (or the daily routine) retries. The block is also `|| true` (non-fatal).
+        GBRAIN_POST_UPGRADE_TIMEOUT_MS=180000 gbrain post-upgrade 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        # Enable RLS on any public table missing it — Supabase grants no superuser,
+        # so gbrain's auto-RLS event trigger can't install and migration-created
+        # tables don't get RLS automatically. Idempotent. (Quoted heredoc so the
+        # bun snippet is taken literally — no shell expansion of $ / backticks.)
+        if [ -n "${DATABASE_URL}" ]; then
+          cat > /tmp/_gbrain_rls.ts <<'RLSEOF'
+const { SQL } = require("bun");
+const sql = new SQL(process.env.DATABASE_URL);
+const rows = await sql.unsafe("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity");
+for (const t of rows) { await sql.unsafe(`ALTER TABLE "public"."${t.relname}" ENABLE ROW LEVEL SECURITY`); console.log("RLS enabled:", t.relname); }
+if (!rows.length) console.log("RLS: all public tables already protected");
+await sql.end();
+RLSEOF
+          bun /tmp/_gbrain_rls.ts 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        fi
+        gbrain doctor 2>&1 | grep -iE '\[FAIL\]|Overall health|brain_score' | sed 's/^/[gbrain-boot-task] /'
+        ;;
+      doctor)
+        gbrain doctor 2>&1 | grep -iE '\[FAIL\]|\[WARN\]|Overall health|brain_score' | sed 's/^/[gbrain-boot-task] /'
+        ;;
+      verify)
+        bash /data/scripts/verify-upgrade.sh 2>&1 | sed 's/^/[gbrain-boot-task] /'; btlog "verify-upgrade exit=$?"
+        ;;
+      *)
+        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify) — skipping"
+        ;;
+    esac
+    btlog "task=${GBRAIN_BOOT_TASK} done"
+  fi
+) || true
+
 # --- gbrain autopilot bootstrap (canonical ephemeral-container launch) -----
 # gbrain is baked into the image at /usr/local/bun/bin (see Dockerfile). On
 # Railway, gbrain detects an ephemeral container (RAILWAY_ENVIRONMENT is set)
