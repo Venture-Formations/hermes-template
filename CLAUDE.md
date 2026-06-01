@@ -49,9 +49,11 @@ longer the only one. The deploy branch has since grown additional VF
 customizations (detailed in the sections below):
 
 - **`Dockerfile`** — the `HERMES_REPO`/`HERMES_REF` params above, plus the
-  **gbrain binary bake** (`bun install -g github:garrytan/gbrain` →
-  `/usr/local/bun`, with `unzip` added to apt) and the **youtube-collector
-  deps** (`yt-dlp` + `ffmpeg`, baked for the `youtube-playlist-sync` cron).
+  **gbrain binary bake** (`bun install -g github:garrytan/gbrain#${GBRAIN_REF}`
+  → `/usr/local/bun`, **PINNED** to a specific commit via `ARG GBRAIN_REF` —
+  bumped to a newer master commit by the "gbrain daily update watcher" routine;
+  `unzip` added to apt) and the **youtube-collector deps** (`yt-dlp` + `ffmpeg`,
+  baked for the `youtube-playlist-sync` cron).
 - **`start.sh`** — the **gbrain autopilot bootstrap** block (runs
   `gbrain autopilot --install --no-inject` + launches the daemon before
   `exec python /app/server.py`).
@@ -164,10 +166,17 @@ gbrain is now **baked into the Docker image**, not installed at runtime.
 
 - **Binary path:** `/usr/local/bun/bin/gbrain`. The Dockerfile installs Bun
   with `BUN_INSTALL=/usr/local/bun` and runs `bun install -g
-  github:garrytan/gbrain` (the canonical install — see gbrain
-  `INSTALL_FOR_AGENTS.md` Step 1 and `docs/operations/headless-install.md`
-  Pattern 1). `/usr/local/bun/bin` is on `PATH`, and a `gbrain --version`
-  smoke check fails the build if the ref is unresolvable.
+  github:garrytan/gbrain#${GBRAIN_REF}` — **pinned** to a specific commit via
+  `ARG GBRAIN_REF` (the canonical install — see gbrain `INSTALL_FOR_AGENTS.md`
+  Step 1 and `docs/operations/headless-install.md` Pattern 1 — with a
+  reproducible pin so rebuilds are deterministic). `/usr/local/bun/bin` is on
+  `PATH`, and a `gbrain --version` smoke check fails the build if the ref is
+  unresolvable.
+  - **Upgrades** bump `ARG GBRAIN_REF` to a newer `garrytan/gbrain` master
+    commit — done autonomously by the "gbrain daily update watcher" remote
+    routine (daily), or manually — and Railway rebuilds onto the new version.
+    The on-container `gbrain-update-check` cron (in hermes-workspace) only
+    *surfaces* available bumps notify-only; it never installs.
   - This **replaces the old ephemeral `/opt/bun/bin` assumption**, where
     gbrain lived on a path that vanished on every Railway rebuild.
 - **Autopilot daemon at boot:** `start.sh` runs gbrain's canonical
