@@ -128,4 +128,30 @@ RLSEOF
   fi
 ) || true
 
+# --- gbrain HTTP MCP server (remote MCP for claude.ai / Cowork etc.) --------
+# Exposes the brain over MCP at https://gbrain.ventureformations.com/mcp
+# (Railway custom domain -> this container's port 8787). Canonical refs
+# (github.com/garrytan/gbrain @ master): docs/mcp/DEPLOY.md + docs/mcp/CLAUDE_COWORK.md.
+#   - --bind 0.0.0.0 is REQUIRED for remote clients (default is 127.0.0.1 since
+#     v0.34.1, which would refuse the Railway edge).
+#   - --public-url sets the OAuth issuer in discovery metadata to the public host
+#     (RFC 8414 §3.3) so it matches what clients hit.
+#   - GBRAIN_HTTP_TRUST_PROXY=1: gbrain sits behind Railway's TLS-terminating
+#     proxy (one hop); express-rate-limit otherwise rejects the X-Forwarded-For.
+# Long-lived foreground server, so we nohup-background it explicitly. Non-fatal:
+# a serve hiccup must never block the Hermes gateway (set +e + `|| true`).
+(
+  set +e
+  if command -v gbrain >/dev/null 2>&1; then
+    echo "[gbrain-serve] launching HTTP MCP server on :8787 (public https://gbrain.ventureformations.com/mcp)"
+    GBRAIN_HTTP_TRUST_PROXY="${GBRAIN_HTTP_TRUST_PROXY:-1}" \
+      nohup gbrain serve --http --bind 0.0.0.0 --port 8787 \
+        --public-url https://gbrain.ventureformations.com \
+        > /tmp/gbrain-serve.log 2>&1 &
+    echo "[gbrain-serve] pid $! — logs at /tmp/gbrain-serve.log"
+  else
+    echo "[gbrain-serve] WARN: gbrain not on PATH; skipping MCP server"
+  fi
+) || true
+
 exec python /app/server.py
