@@ -53,10 +53,20 @@ customizations (detailed in the sections below):
   → `/usr/local/bun`, **PINNED** to a specific commit via `ARG GBRAIN_REF` —
   bumped to a newer master commit by the "gbrain daily update watcher" routine;
   `unzip` added to apt) and the **youtube-collector deps** (`yt-dlp` + `ffmpeg`,
-  baked for the `youtube-playlist-sync` cron).
+  baked for the `youtube-playlist-sync` cron), plus the **gbrain core
+  model-default patch** (`COPY patches/` + `RUN bash
+  patches/gbrain-openrouter-model-defaults.sh` right after the bake — see
+  "gbrain core patch" below).
+- **`patches/gbrain-openrouter-model-defaults.sh`** — the **only place VF
+  modifies gbrain CORE**. Rewrites gbrain's hardcoded native `anthropic:`
+  model defaults (~8 LLM touchpoints) to OpenRouter-routed equivalents so the
+  brain runs on `OPENROUTER_API_KEY` (we have no `ANTHROPIC_API_KEY`). Applied
+  at build time, re-applied on every `GBRAIN_REF` bump. **⚠️ must be
+  re-validated on every gbrain upgrade** — see the dedicated section below and
+  `UPGRADING_GBRAIN.md`.
 - **`start.sh`** — the **gbrain autopilot bootstrap** block (runs
   `gbrain autopilot --install --no-inject` + launches the daemon before
-  `exec python /app/server.py`).
+  `exec python /app/server.py`), plus the **gbrain HTTP MCP server** block.
 
 Files VF has **not** modified — `server.py`, `requirements.txt`,
 `railway.toml`, `templates/` — remain upstream. (They can still show a diff
@@ -193,6 +203,48 @@ gbrain is now **baked into the Docker image**, not installed at runtime.
   logged and never blocks the gateway.
 - Autopilot self-supervises (it forks/restarts the Minions worker), so no
   external watchdog cron is needed.
+
+## gbrain core patch — `patches/gbrain-openrouter-model-defaults.sh`
+
+**This is the ONLY place VF modifies gbrain core.** The "never modify gbrain
+core" rule (hermes-workspace `CLAUDE.md`) has this one documented exception.
+
+**Why.** A gbrain model string's provider prefix selects the API key:
+`anthropic:claude-haiku-4-5` → Anthropic API (`ANTHROPIC_API_KEY`);
+`openrouter:anthropic/claude-haiku-4.5` → OpenRouter (`OPENROUTER_API_KEY`) —
+same model. This deployment has **only** `OPENROUTER_API_KEY` + `OPENAI_API_KEY`
+(no Anthropic key). gbrain hardcodes native `anthropic:` strings as the default
+for ~8 LLM touchpoints that have **no config knob** (fact-dedup classifier,
+page synopsis, contextual-retrieval, `takes extract --from-pages`, contradiction
+judge, brainstorm, propose/grade takes, gateway chat/expansion defaults). Those
+paths throw inside `chat()` and are swallowed silently — facts/takes extractors
+return `[]`, fact-dedup degrades to `cosine_fallback`. Setting
+`models.default`/`chat_model` (in `/data/.gbrain/config.json`) only fixes the
+config-backed paths; the patch rewrites the hardcoded literals to their
+OpenRouter equivalents (haiku→haiku, sonnet→sonnet) so the whole brain runs on
+the OpenRouter key.
+
+**How it's applied.** Build-time `RUN` in the `Dockerfile` immediately after the
+gbrain bake, so it's baked into the image and re-applied on every `GBRAIN_REF`
+bump. The post-patch `gbrain --version` fails the build loudly if the patched
+tree won't load. The script is idempotent and also safe to run on a live
+container (the canonical recovery if a rebuild ever lands without the patch:
+`bash /app/patches/gbrain-openrouter-model-defaults.sh`).
+
+**⚠️ VALIDATE ON EVERY gbrain UPGRADE.** gbrain may rename a model id, move a
+default, or add a new hardcoded `anthropic:` touchpoint. The script's post-patch
+audit must report **0 remaining native-anthropic model defaults**. If non-zero,
+add the new literal to the `apply` list in the script. This is a required step
+in `UPGRADING_GBRAIN.md`. (The native `anthropic:messages` rate-limit key is
+intentionally NOT a model — it must stay untouched.)
+
+**Related runtime config (on the `/data` volume, survives rebuilds — NOT part of
+the patch but part of the same OpenRouter-only setup):**
+`/data/.gbrain/config.json` carries `chat_model` + `expansion_model` =
+`openrouter:anthropic/claude-haiku-4.5` and the DB config store carries
+`models.default = openrouter:auto`. The lone remaining native-Anthropic
+dependency is the prompt-cache `subagent_capability` WARN (only gbrain's native
+`anthropic` recipe sets `supports_prompt_cache:true`) — benign, deferred.
 
 ## For full deployment context
 

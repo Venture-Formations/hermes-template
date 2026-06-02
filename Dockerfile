@@ -95,6 +95,26 @@ RUN curl -fsSL https://bun.sh/install | bash && \
     # (Step 1: "gbrain --version should print a version number").
     gbrain --version
 
+# --- VF gbrain CORE patch: route hardcoded `anthropic:` model defaults -> OpenRouter
+# gbrain hardcodes native `anthropic:` model strings as the default for ~8 LLM
+# touchpoints (fact-dedup classifier, page synopsis, contextual-retrieval, takes
+# bootstrap, contradiction judge, brainstorm, propose/grade takes, gateway
+# chat/expansion). This deployment has only OPENROUTER_API_KEY + OPENAI_API_KEY
+# (no Anthropic key), so those paths throw inside chat() and are swallowed
+# silently (facts/takes return []/continue; fact-dedup degrades to cosine).
+# Setting `models.default`/`chat_model` only fixes config-backed paths; these
+# literals have no config knob, so we rewrite them to OpenRouter-routed
+# equivalents (same model + tier). This is the ONE place we modify gbrain CORE
+# (documented exception to the "never modify gbrain core" rule — see CLAUDE.md).
+# Re-applied on every rebuild so it survives GBRAIN_REF bumps; the post-patch
+# `gbrain --version` fails the build loudly if the patched tree won't load.
+# ⚠️ VALIDATE ON EVERY UPGRADE: gbrain may rename a model id / add a new
+# hardcoded touchpoint — the script's audit must report 0 leftovers (see
+# UPGRADING_GBRAIN.md). Idempotent + safe to re-run.
+COPY patches/ /app/patches/
+RUN bash /app/patches/gbrain-openrouter-model-defaults.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-
