@@ -84,8 +84,33 @@ RLSEOF
       verify)
         bash /data/scripts/verify-upgrade.sh 2>&1 | sed 's/^/[gbrain-boot-task] /'; btlog "verify-upgrade exit=$?"
         ;;
+      selfheal-sync)
+        # ONE-SHOT brain recovery (set this var, redeploy, read logs, then
+        # reset GBRAIN_BOOT_TASK back to `post-upgrade`). Do NOT leave this set
+        # persistently — `sync --skip-failed` permanently advances the bookmark
+        # past whatever file is currently blocking ingestion, so a poison file
+        # that's still on disk gets silently dropped on every rebuild.
+        #
+        # Order matters: migrations first (a missing column can itself make a
+        # cycle phase throw), then name the blocking file(s), then advance the
+        # sync bookmark past them so the backlog of good pages finally imports.
+        btlog "selfheal-sync: applying pending migrations"
+        GBRAIN_POST_UPGRADE_TIMEOUT_MS=180000 gbrain post-upgrade 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        gbrain apply-migrations --yes 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        btlog "selfheal-sync: recorded sync failures (the file(s) blocking ingestion):"
+        if [ -f "$HOME/.gbrain/sync-failures.jsonl" ]; then
+          sed 's/^/[gbrain-boot-task] FAILED-FILE: /' "$HOME/.gbrain/sync-failures.jsonl"
+        else
+          btlog "  (no ~/.gbrain/sync-failures.jsonl yet)"
+        fi
+        btlog "selfheal-sync: advancing sync bookmark past the blocked file(s)"
+        gbrain sync --skip-failed 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        gbrain embed --stale 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        gbrain doctor 2>&1 | grep -iE '\[FAIL\]|\[WARN\]|brain_score|Overall health' | sed 's/^/[gbrain-boot-task] /'
+        btlog "selfheal-sync: DONE — reset GBRAIN_BOOT_TASK to post-upgrade now"
+        ;;
       *)
-        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify) — skipping"
+        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify|selfheal-sync) — skipping"
         ;;
     esac
     btlog "task=${GBRAIN_BOOT_TASK} done"
