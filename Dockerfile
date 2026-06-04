@@ -115,6 +115,21 @@ COPY patches/ /app/patches/
 RUN bash /app/patches/gbrain-openrouter-model-defaults.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch #2: curated MCP tool allowlist -------------------
+# `gbrain serve --http` advertises all ~81 non-localOnly operations over MCP and
+# does NOT filter the tool list by OAuth scope (scope is enforced only at call
+# time), and gbrain ships no flag to expose a subset. This patch makes serve
+# honor an optional GBRAIN_MCP_TOOLS env allowlist (comma-separated op names),
+# so the exposed tool surface is controlled at runtime via a Railway service var
+# (unset = all tools; set = just those). Trims client context + improves tool
+# selection. SECOND (and final) documented exception to "never modify gbrain
+# core" — see CLAUDE.md. ⚠️ VALIDATE ON EVERY UPGRADE: the patch anchors on the
+# `operations.filter(op => !op.localOnly)` line in serve-http.ts; if gbrain moves
+# it the script EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving)
+# so the anchor gets re-pointed. See UPGRADING_GBRAIN.md. Idempotent.
+RUN bash /app/patches/gbrain-mcp-tool-allowlist.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

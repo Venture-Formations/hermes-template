@@ -204,47 +204,67 @@ gbrain is now **baked into the Docker image**, not installed at runtime.
 - Autopilot self-supervises (it forks/restarts the Minions worker), so no
   external watchdog cron is needed.
 
-## gbrain core patch — `patches/gbrain-openrouter-model-defaults.sh`
+## gbrain core patches (`patches/`)
 
-**This is the ONLY place VF modifies gbrain core.** The "never modify gbrain
-core" rule (hermes-workspace `CLAUDE.md`) has this one documented exception.
+**These are the ONLY two places VF modifies gbrain core.** The "never modify
+gbrain core" rule (hermes-workspace `CLAUDE.md`) has exactly these two documented
+exceptions. Both are applied at Docker BUILD time (after the gbrain bake), baked
+into the image, re-applied on every `GBRAIN_REF` bump, idempotent, and each is
+followed by a `gbrain --version` smoke gate that fails the build if the patched
+tree won't load.
+
+> 🔁 **BOTH patches MUST be re-validated on every gbrain release/`GBRAIN_REF`
+> bump.** gbrain rewrites/moves the literals + line they anchor on. Each patch
+> self-audits and **fails the build** (old container keeps serving — no outage)
+> if its anchor is gone, forcing a re-point. This is a required step in
+> `UPGRADING_GBRAIN.md`.
+
+### 1. `gbrain-openrouter-model-defaults.sh` — de-pin models to `openrouter:auto`
 
 **Why.** A gbrain model string's provider prefix selects the API key:
 `anthropic:claude-haiku-4-5` → Anthropic API (`ANTHROPIC_API_KEY`);
-`openrouter:anthropic/claude-haiku-4.5` → OpenRouter (`OPENROUTER_API_KEY`) —
-same model. This deployment has **only** `OPENROUTER_API_KEY` + `OPENAI_API_KEY`
-(no Anthropic key). gbrain hardcodes native `anthropic:` strings as the default
-for ~8 LLM touchpoints that have **no config knob** (fact-dedup classifier,
-page synopsis, contextual-retrieval, `takes extract --from-pages`, contradiction
-judge, brainstorm, propose/grade takes, gateway chat/expansion defaults). Those
-paths throw inside `chat()` and are swallowed silently — facts/takes extractors
-return `[]`, fact-dedup degrades to `cosine_fallback`. Setting
-`models.default`/`chat_model` (in `/data/.gbrain/config.json`) only fixes the
-config-backed paths; the patch rewrites the hardcoded literals to their
-OpenRouter equivalents (haiku→haiku, sonnet→sonnet) so the whole brain runs on
-the OpenRouter key.
+`openrouter:auto` → OpenRouter (`OPENROUTER_API_KEY`). This deployment has
+**only** `OPENROUTER_API_KEY` + `OPENAI_API_KEY` (no Anthropic key). gbrain
+hardcodes native `anthropic:` strings as the default for ~8 LLM touchpoints with
+**no config knob** (fact-dedup classifier, page synopsis, contextual-retrieval,
+`takes extract --from-pages`, contradiction judge, brainstorm, propose/grade
+takes, gateway chat/expansion). Those paths throw inside `chat()` and are
+swallowed silently. Setting `models.default`/`chat_model` only fixes
+config-backed paths; the patch rewrites the hardcoded literals.
 
-**How it's applied.** Build-time `RUN` in the `Dockerfile` immediately after the
-gbrain bake, so it's baked into the image and re-applied on every `GBRAIN_REF`
-bump. The post-patch `gbrain --version` fails the build loudly if the patched
-tree won't load. The script is idempotent and also safe to run on a live
-container (the canonical recovery if a rebuild ever lands without the patch:
-`bash /app/patches/gbrain-openrouter-model-defaults.sh`).
+**As of 2026-06-04 the patch rewrites ALL of them to `openrouter:auto`** (was
+haiku/sonnet/opus) — operator chose fully-dynamic, no pinned models, mirroring
+the Hermes dashboard (main model = openrouter/auto, all aux tasks = "use main
+model"). Runtime config matches: `models.default`, `models.tier.subagent`, and
+`chat_model` are all `openrouter:auto` (DB config store + `/data/.gbrain/
+config.json`, both survive rebuilds). **⚠️ On upgrade the audit must report 0
+remaining `anthropic:claude-*` MODEL defaults** (pricing-table `anthropic:*`
+keys are inert metadata and may remain — they're not defaults; a side effect is
+slightly-off internal cost estimates for `openrouter:auto`, cosmetic). The native
+`anthropic:messages` rate-limit key is NOT a model — leave it. The prompt-cache
+`subagent_capability` WARN is now permanent-by-design (auto never caches) —
+accepted, informational, needs an Anthropic key to clear.
 
-**⚠️ VALIDATE ON EVERY gbrain UPGRADE.** gbrain may rename a model id, move a
-default, or add a new hardcoded `anthropic:` touchpoint. The script's post-patch
-audit must report **0 remaining native-anthropic model defaults**. If non-zero,
-add the new literal to the `apply` list in the script. This is a required step
-in `UPGRADING_GBRAIN.md`. (The native `anthropic:messages` rate-limit key is
-intentionally NOT a model — it must stay untouched.)
+### 2. `gbrain-mcp-tool-allowlist.sh` — curated MCP tool surface
 
-**Related runtime config (on the `/data` volume, survives rebuilds — NOT part of
-the patch but part of the same OpenRouter-only setup):**
-`/data/.gbrain/config.json` carries `chat_model` + `expansion_model` =
-`openrouter:anthropic/claude-haiku-4.5` and the DB config store carries
-`models.default = openrouter:auto`. The lone remaining native-Anthropic
-dependency is the prompt-cache `subagent_capability` WARN (only gbrain's native
-`anthropic` recipe sets `supports_prompt_cache:true`) — benign, deferred.
+**Why.** `gbrain serve --http` advertises all ~81 non-localOnly operations over
+MCP and does **not** filter the tool list by OAuth scope (scope is enforced only
+at *call* time — so reducing a connector's scope does NOT reduce its tool count).
+gbrain ships no flag to expose a subset. An 81-tool surface bloats client context
+and hurts tool selection.
+
+**What it does.** Rewrites the one line in `serve-http.ts`
+(`const mcpOperations = operations.filter(op => !op.localOnly)`) to also honor an
+optional **`GBRAIN_MCP_TOOLS`** env allowlist (comma-separated op names, a Railway
+service var). Unset = all tools (unchanged); set = only those tools are advertised
++ callable. **Change the exposed set anytime by editing the `GBRAIN_MCP_TOOLS`
+Railway var — no rebuild needed for list changes** (only a rebuild re-applies the
+source patch itself). Current curated set is ~18 retrieval-focused ops (search,
+query, recall, think, get_page, list_pages, get_backlinks, get_links,
+get_timeline, find_experts, traverse_graph, get_recent_salience, find_anomalies,
+put_page, add_link, add_timeline_entry, get_stats, get_health). **⚠️ On upgrade**:
+if gbrain moves the anchor line, this patch fails the build with
+`[gbrain-mcp-allowlist] anchor not found` — re-point it in the script.
 
 ## For full deployment context
 
