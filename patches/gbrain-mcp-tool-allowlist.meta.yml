@@ -1,0 +1,31 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-mcp-tool-allowlist
+title: "Honor a GBRAIN_MCP_TOOLS allowlist in serve-http"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-mcp-tool-allowlist.sh
+source_sha: "352fd55646e9a6603d8bf608e7d2a56d0597057e554a101f976f0bd0c8046ae6"
+# anchor: the exact gbrain source line the patch rewrites; checked present in the
+# PATCH BODY by --check. If gbrain moves/renames it, the patch fails the build.
+anchor: "operations.filter(op => !op.localOnly)"
+# invariant: runtime assertion verify-upgrade.sh checks on-container.
+invariant: "serve-http.ts contains the __gbAllow marker (allowlist patch applied)"
+target_files:
+  - "src/commands/serve-http.ts"   # DOC ONLY — upstream gbrain file, not in any checked-out repo
+why: >
+  `gbrain serve --http` advertises every non-localOnly operation (~81 tools) to
+  every authenticated client; the list is not filtered by OAuth scope and gbrain
+  ships no flag to expose a subset. An 81-tool surface bloats client context and
+  hurts tool selection. The patch teaches serve-http.ts to honor an optional
+  GBRAIN_MCP_TOOLS env allowlist (comma-separated op names) — unset = unchanged
+  behavior; set = only those tools advertised + callable. The exposed set is then
+  controlled at runtime via the Railway var, no rebuild needed for list changes.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "gbrain ships a native MCP tool-allowlist / scope-filtered tool list flag"
+added: "2026-06-04"
+last_validated_ref: "gbrain@9a0bae8"   # auto-compared to live Dockerfile GBRAIN_REF by --check
+upstream: garrytan/gbrain

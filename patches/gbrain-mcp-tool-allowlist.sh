@@ -19,10 +19,10 @@
 # So the exposed tool set is controlled at runtime via a Railway service var —
 # edit GBRAIN_MCP_TOOLS to change it, no rebuild needed for list changes.
 #
-# This is the SECOND place we modify gbrain CORE (the first is
-# gbrain-openrouter-model-defaults.sh). The "never modify gbrain core" rule has
-# these two documented exceptions (see hermes-template + hermes-workspace
-# CLAUDE.md). Applied at Docker BUILD time, baked into the image, re-applied on
+# This is a gbrain CORE modification. The authoritative, GENERATED registry of
+# every modification we carry (and why each exists) is
+# hermes-workspace/MODIFICATIONS.md — never hand-maintain a count of core patches
+# in prose. Applied at Docker BUILD time, baked into the image, re-applied on
 # every GBRAIN_REF bump. Idempotent (no-op if already patched).
 #
 # ⚠️ VALIDATE ON EVERY gbrain UPGRADE: this patch anchors on the exact
