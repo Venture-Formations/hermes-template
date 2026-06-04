@@ -119,8 +119,8 @@ RLSEOF
         #
         # 1. Route the subagent tier to OpenRouter (no Anthropic dependency). `auto`
         #    can land on weak/no-tool models and never caches; pin a capable one.
-        btlog "selfheal-full: pin models.tier.subagent to OpenRouter Sonnet"
-        gbrain config set models.tier.subagent openrouter:anthropic/claude-sonnet-4.6 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        btlog "selfheal-full: set models.tier.subagent to openrouter:auto (dynamic)"
+        gbrain config set models.tier.subagent openrouter:auto 2>&1 | sed 's/^/[gbrain-boot-task] /'
         # 2. Re-apply migrations the ledger reports as done but whose columns are
         #    missing ("falsely up-to-date"). v43 = takes.resolved_quality (calibration
         #    phase); v51 = facts_fence_columns (v0.32.2 fence → extract_facts). Both

@@ -50,10 +50,15 @@ if [ -z "$GBRAIN_SRC" ]; then
 fi
 echo "[gbrain-patch] target: $GBRAIN_SRC"
 
-# OpenRouter-routed equivalents (proven valid slugs; haiku 4.5 verified live).
-OR_HAIKU='openrouter:anthropic/claude-haiku-4.5'
-OR_SONNET='openrouter:anthropic/claude-sonnet-4.6'
-OR_OPUS='openrouter:anthropic/claude-opus-4.7'   # "deep"/optimizer tier (skillopt etc.)
+# De-pinned: every previously-hardcoded tier now routes through openrouter:auto
+# so gbrain is fully DYNAMIC (no model is pinned in source). This mirrors the
+# Hermes dashboard pattern (main model = openrouter/auto, all auxiliary tasks =
+# "auto / use main model") — one dynamic OpenRouter auto-router everywhere,
+# tuned via OpenRouter provider preferences rather than baked-in model ids.
+# (haiku/sonnet/opus tier distinctions collapse into auto by design.)
+OR_HAIKU='openrouter:auto'
+OR_SONNET='openrouter:auto'
+OR_OPUS='openrouter:auto'
 
 # Exact-string rewrites. Order matters for haiku: the dated literal must be
 # rewritten before the bare one so the bare rule does not corrupt the suffix.
