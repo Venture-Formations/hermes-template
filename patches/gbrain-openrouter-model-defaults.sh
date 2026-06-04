@@ -97,10 +97,18 @@ apply "?? 'claude-opus-4-7'"                   "?? '${OR_OPUS}'"
 
 # Post-patch audit: any quoted `anthropic:claude-*` model default, or a bare
 # `?? 'claude-*'` default, still present is a NEW touchpoint gbrain introduced.
+# EXCLUSIONS (not model defaults — must not fail the build):
+#   - /ai/recipes/  : provider recipe arrays list bare ids.
+#   - pricing       : the cost tables (model-pricing.ts, takes-quality-eval/
+#                     pricing.ts, cross-modal-eval) key cost rows BY model id,
+#                     e.g. `'anthropic:claude-opus-4-8': { input, output }`.
+#                     Those are metadata, not a default that picks the API key —
+#                     they never route an LLM call, so they stay native and are
+#                     intentionally ignored here (cosmetic cost-estimate skew only).
 echo "[gbrain-patch] audit — remaining native-anthropic model defaults:"
 REMAIN=$(grep -rnE "'anthropic:claude-[a-z0-9.-]+'|\?\? '(anthropic:)?claude-[a-z0-9.-]+'" \
            --include='*.ts' "$GBRAIN_SRC" 2>/dev/null \
-           | grep -v '/ai/recipes/' || true)
+           | grep -vE '/ai/recipes/|pricing' || true)
 if [ -n "$REMAIN" ]; then
   echo "$REMAIN" | sed 's/^/[gbrain-patch]   LEFTOVER: /' >&2
   echo "[gbrain-patch] ⚠️  $(echo "$REMAIN" | wc -l | tr -d ' ') leftover default(s) — update REPLACEMENTS in this script." >&2
