@@ -109,8 +109,36 @@ RLSEOF
         gbrain doctor 2>&1 | grep -iE '\[FAIL\]|\[WARN\]|brain_score|Overall health' | sed 's/^/[gbrain-boot-task] /'
         btlog "selfheal-sync: DONE — reset GBRAIN_BOOT_TASK to post-upgrade now"
         ;;
+      selfheal-full)
+        # ONE-SHOT comprehensive recovery (reset GBRAIN_BOOT_TASK to post-upgrade
+        # after). Fast, idempotent fixes run inline; the slow backfills (extract /
+        # reindex) are BACKGROUNDED so they can't blow Railway's ~5-min healthcheck
+        # window — they keep running after the gateway comes up (log:
+        # /tmp/gbrain-backfill.log). Do NOT redeploy until the backfills finish, or
+        # they restart from scratch (both are idempotent, so a restart is safe).
+        #
+        # 1. Route the subagent tier to OpenRouter (no Anthropic dependency). `auto`
+        #    can land on weak/no-tool models and never caches; pin a capable one.
+        btlog "selfheal-full: pin models.tier.subagent to OpenRouter Sonnet"
+        gbrain config set models.tier.subagent openrouter:anthropic/claude-sonnet-4.6 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        # 2. Re-apply migrations the ledger reports as done but whose columns are
+        #    missing ("falsely up-to-date"). v43 = takes.resolved_quality (calibration
+        #    phase); v51 = facts_fence_columns (v0.32.2 fence → extract_facts). Both
+        #    are ADD COLUMN IF NOT EXISTS, so force-retry is safe + idempotent.
+        btlog "selfheal-full: force-retry migrations v43 (resolved_quality) + v51 (facts fence)"
+        gbrain apply-migrations --force-retry 43 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        gbrain apply-migrations --force-retry 51 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        # 3. Acknowledge the now-stale recorded sync failure (8090, already fixed).
+        gbrain sync --skip-failed 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        gbrain doctor 2>&1 | grep -iE '\[FAIL\]|\[WARN\]|brain_score|Overall health' | sed 's/^/[gbrain-boot-task] /'
+        # 4. Background the heavy backfills: extract --stale (un-extracted edges →
+        #    graph/find_experts quality) + reindex --markdown (contextual-retrieval).
+        btlog "selfheal-full: backgrounding extract --stale + reindex --markdown (-> /tmp/gbrain-backfill.log)"
+        nohup sh -c 'gbrain extract --stale 2>&1; gbrain reindex --markdown 2>&1' > /tmp/gbrain-backfill.log 2>&1 &
+        btlog "selfheal-full: DONE — reset GBRAIN_BOOT_TASK to post-upgrade after backfills finish"
+        ;;
       *)
-        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify|selfheal-sync) — skipping"
+        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify|selfheal-sync|selfheal-full) — skipping"
         ;;
     esac
     btlog "task=${GBRAIN_BOOT_TASK} done"
