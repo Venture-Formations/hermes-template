@@ -19,9 +19,10 @@
 # their OpenRouter-routed equivalents (same model, same tier — haiku->haiku,
 # sonnet->sonnet) so the whole brain runs on the OpenRouter key.
 #
-# This is the ONE place gbrain *core* is modified (see hermes-template and
-# hermes-workspace CLAUDE.md — the "never modify gbrain core" rule has this
-# documented exception). It is applied at Docker BUILD time (right after the
+# This is a gbrain *core* modification. The authoritative, GENERATED registry of
+# every modification we carry (and why each exists) is
+# hermes-workspace/MODIFICATIONS.md — never hand-maintain a count of core patches
+# in prose. It is applied at Docker BUILD time (right after the
 # gbrain install) so it is baked into the image and re-applied on every
 # GBRAIN_REF bump. It is also safe to run on a live container.
 #

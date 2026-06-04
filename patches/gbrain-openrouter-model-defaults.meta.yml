@@ -1,0 +1,34 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-openrouter-model-defaults
+title: "Route gbrain's hardcoded anthropic: model defaults to OpenRouter"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-openrouter-model-defaults.sh
+source_sha: "435c2a519cfb5ed8b773cf23af18d0beaf4a920e732921241d55dc5f586e2e7f"
+# anchor: a stable string the patch depends on finding in the gbrain source.
+# Checked present in the PATCH BODY by --check; if gbrain renames it the patch
+# itself fails the Docker build.
+anchor: "anthropic:claude-haiku-4-5"
+# invariant: the runtime assertion verify-upgrade.sh checks on-container.
+invariant: "post-patch audit reports 0 remaining anthropic:claude-* model defaults"
+# target_files: DOC ONLY — these live in the gbrain install tree, not in any
+# checked-out repo, so they are not validated against the local filesystem.
+target_files:
+  - "gbrain src: ~8 LLM touchpoints (fact-dedup classifier, page synopsis, contextual-retrieval, takes bootstrap, contradiction judge, brainstorm, propose/grade takes, gateway chat/expansion defaults)"
+why: >
+  gbrain hardcodes native `anthropic:` model strings as the default for ~8 LLM
+  touchpoints, with no config knob. The provider prefix picks the API key; this
+  deployment has only OPENROUTER_API_KEY + OPENAI_API_KEY (no ANTHROPIC_API_KEY),
+  so every path that falls through to an `anthropic:` default throws inside chat()
+  and is swallowed silently (facts/takes extractors return [], fact-dedup degrades
+  to cosine_fallback). The patch rewrites those literals to openrouter:auto so the
+  whole brain runs on the OpenRouter key.
+reapply: docker-build      # idempotent sed; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "gbrain exposes a config knob for all LLM touchpoints, OR an ANTHROPIC_API_KEY is provisioned for this deployment"
+added: "2026-06-02"
+last_validated_ref: "gbrain@9a0bae8"   # auto-compared to live Dockerfile GBRAIN_REF by --check
+upstream: garrytan/gbrain

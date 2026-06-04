@@ -36,7 +36,7 @@ RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/NousResearch/h
 
 # After (us):
 ARG HERMES_REPO=Venture-Formations/hermes-agent
-ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.28
+ARG HERMES_REF=fix/parallel-tool-calls-v2026.5.29.2
 RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}.git /opt/hermes-agent && \
     ...
 ```
@@ -57,8 +57,9 @@ customizations (detailed in the sections below):
   model-default patch** (`COPY patches/` + `RUN bash
   patches/gbrain-openrouter-model-defaults.sh` right after the bake — see
   "gbrain core patch" below).
-- **`patches/gbrain-openrouter-model-defaults.sh`** — the **only place VF
-  modifies gbrain CORE**. Rewrites gbrain's hardcoded native `anthropic:`
+- **`patches/gbrain-openrouter-model-defaults.sh`** — a gbrain CORE patch (the
+  authoritative list of all core patches is the generated
+  `hermes-workspace/MODIFICATIONS.md`). Rewrites gbrain's hardcoded native `anthropic:`
   model defaults (~8 LLM touchpoints) to OpenRouter-routed equivalents so the
   brain runs on `OPENROUTER_API_KEY` (we have no `ANTHROPIC_API_KEY`). Applied
   at build time, re-applied on every `GBRAIN_REF` bump. **⚠️ must be
@@ -206,12 +207,16 @@ gbrain is now **baked into the Docker image**, not installed at runtime.
 
 ## gbrain core patches (`patches/`)
 
-**These are the ONLY two places VF modifies gbrain core.** The "never modify
-gbrain core" rule (hermes-workspace `CLAUDE.md`) has exactly these two documented
-exceptions. Both are applied at Docker BUILD time (after the gbrain bake), baked
-into the image, re-applied on every `GBRAIN_REF` bump, idempotent, and each is
-followed by a `gbrain --version` smoke gate that fails the build if the patched
-tree won't load.
+These are gbrain CORE patches. The authoritative, GENERATED registry of every
+core patch (and why each exists / when to retire it) is
+`hermes-workspace/MODIFICATIONS.md` (🔴 gbrain core) — **do not hand-maintain a
+count or list of core patches in prose here**; that is the drift the registry
+exists to kill. Each patch has a `.meta.yml` sidecar, and the pre-commit registry
+gate blocks any commit that adds/changes a patch without updating it. All core
+patches are applied at Docker BUILD time (after the gbrain bake), baked into the
+image, re-applied on every `GBRAIN_REF` bump, idempotent, and each is followed by
+a `gbrain --version` smoke gate that fails the build if the patched tree won't
+load.
 
 > 🔁 **BOTH patches MUST be re-validated on every gbrain release/`GBRAIN_REF`
 > bump.** gbrain rewrites/moves the literals + line they anchor on. Each patch
