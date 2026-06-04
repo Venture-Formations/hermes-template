@@ -121,13 +121,102 @@ RLSEOF
         #    can land on weak/no-tool models and never caches; pin a capable one.
         btlog "selfheal-full: set models.tier.subagent to openrouter:auto (dynamic)"
         gbrain config set models.tier.subagent openrouter:auto 2>&1 | sed 's/^/[gbrain-boot-task] /'
-        # 2. Re-apply migrations the ledger reports as done but whose columns are
-        #    missing ("falsely up-to-date"). v43 = takes.resolved_quality (calibration
-        #    phase); v51 = facts_fence_columns (v0.32.2 fence → extract_facts). Both
-        #    are ADD COLUMN IF NOT EXISTS, so force-retry is safe + idempotent.
-        btlog "selfheal-full: force-retry migrations v43 (resolved_quality) + v51 (facts fence)"
-        gbrain apply-migrations --force-retry 43 2>&1 | sed 's/^/[gbrain-boot-task] /'
-        gbrain apply-migrations --force-retry 51 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        # 2. Re-create the schema the ledger reports as done but whose objects are
+        #    missing ("falsely up-to-date": config.version >= 80 so the version-gated
+        #    runner applies nothing, yet takes.resolved_quality / drift_decisions are
+        #    absent). `apply-migrations --force-retry <int>` is a SILENT NO-OP here:
+        #    that flag searches the SEMVER orchestrator registry, not the integer
+        #    schema-migration registry, so "43"/"51" match nothing and exit success.
+        #    --force-schema gates on config.version (already advanced) → "Applied 0".
+        #    The only real lever is the idempotent DDL itself, applied directly.
+        #    This is the FULL v43 (takes_resolved_quality_and_drift_decisions) +
+        #    v80 (takes_unresolvable_quality) postgres block from gbrain migrate.ts,
+        #    copied verbatim — every statement is IF-NOT-EXISTS / DROP-IF-EXISTS, so
+        #    a re-run (or running when already healed) is a safe no-op. RLS on
+        #    drift_decisions self-guards on rolbypassrls (Supabase grants none → it
+        #    skips the ENABLE RLS, matching gbrain's own behavior; the boot-task RLS
+        #    sweep above then protects the table table-by-table). (Quoted heredoc so
+        #    the bun snippet is taken literally — no shell expansion of $ / backticks.)
+        btlog "selfheal-full: applying full idempotent v43 + v80 DDL (resolved_quality + drift_decisions + unresolvable widen)"
+        if [ -n "${DATABASE_URL}" ]; then
+          cat > /tmp/_gbrain_v43_v80.ts <<'V43EOF'
+const { SQL } = require("bun");
+const sql = new SQL(process.env.DATABASE_URL);
+// --- v43: takes_resolved_quality_and_drift_decisions (postgres variant, verbatim) ---
+await sql.unsafe(`
+  ALTER TABLE takes
+    ADD COLUMN IF NOT EXISTS resolved_quality TEXT
+      CHECK (resolved_quality IS NULL OR resolved_quality IN ('correct','incorrect','partial'));
+
+  UPDATE takes
+  SET resolved_quality = CASE resolved_outcome
+    WHEN true  THEN 'correct'
+    WHEN false THEN 'incorrect'
+  END
+  WHERE resolved_outcome IS NOT NULL AND resolved_quality IS NULL;
+
+  ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_resolution_consistency;
+  ALTER TABLE takes ADD CONSTRAINT takes_resolution_consistency CHECK (
+    (resolved_quality IS NULL     AND resolved_outcome IS NULL)
+    OR (resolved_quality = 'correct'   AND resolved_outcome = true)
+    OR (resolved_quality = 'incorrect' AND resolved_outcome = false)
+    OR (resolved_quality = 'partial'   AND resolved_outcome IS NULL)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_takes_scorecard
+    ON takes (holder, kind, resolved_quality)
+    WHERE resolved_quality IS NOT NULL;
+
+  CREATE TABLE IF NOT EXISTS drift_decisions (
+    id                  BIGSERIAL   PRIMARY KEY,
+    take_id             BIGINT      NOT NULL REFERENCES takes(id) ON DELETE CASCADE,
+    page_id             INTEGER     NOT NULL,
+    row_num             INTEGER     NOT NULL,
+    recommended_weight  REAL        NOT NULL CHECK (recommended_weight >= 0 AND recommended_weight <= 1),
+    reasoning           TEXT,
+    decided_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    applied_at          TIMESTAMPTZ,
+    applied_by          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_drift_decisions_take       ON drift_decisions(take_id);
+  CREATE INDEX IF NOT EXISTS idx_drift_decisions_decided_at ON drift_decisions(decided_at DESC);
+
+  DO $$
+  DECLARE
+    has_bypass BOOLEAN;
+  BEGIN
+    SELECT rolbypassrls INTO has_bypass FROM pg_roles WHERE rolname = current_user;
+    IF has_bypass THEN
+      ALTER TABLE drift_decisions ENABLE ROW LEVEL SECURITY;
+    END IF;
+  END $$;
+`);
+console.log("v43 DDL applied (resolved_quality + drift_decisions)");
+// --- v80: takes_unresolvable_quality_v0_37_2_0 (verbatim) ---
+await sql.unsafe(`
+  ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_resolved_quality_check;
+  ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_resolved_quality_values;
+  ALTER TABLE takes ADD CONSTRAINT takes_resolved_quality_values CHECK (
+    resolved_quality IS NULL
+    OR resolved_quality IN ('correct', 'incorrect', 'partial', 'unresolvable')
+  );
+
+  ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_resolution_consistency;
+  ALTER TABLE takes ADD CONSTRAINT takes_resolution_consistency CHECK (
+    (resolved_quality IS NULL             AND resolved_outcome IS NULL)
+    OR (resolved_quality = 'correct'      AND resolved_outcome = true)
+    OR (resolved_quality = 'incorrect'    AND resolved_outcome = false)
+    OR (resolved_quality = 'partial'      AND resolved_outcome IS NULL)
+    OR (resolved_quality = 'unresolvable' AND resolved_outcome IS NULL)
+  );
+`);
+console.log("v80 DDL applied (unresolvable widen)");
+await sql.end();
+V43EOF
+          bun /tmp/_gbrain_v43_v80.ts 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        else
+          btlog "selfheal-full: DATABASE_URL unset — skipping v43/v80 DDL"
+        fi
         # 3. Acknowledge the now-stale recorded sync failure (8090, already fixed).
         gbrain sync --skip-failed 2>&1 | sed 's/^/[gbrain-boot-task] /'
         gbrain doctor 2>&1 | grep -iE '\[FAIL\]|\[WARN\]|brain_score|Overall health' | sed 's/^/[gbrain-boot-task] /'

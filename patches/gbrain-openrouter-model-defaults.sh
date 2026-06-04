@@ -102,9 +102,11 @@ REMAIN=$(grep -rnE "'anthropic:claude-[a-z0-9.-]+'|\?\? '(anthropic:)?claude-[a-
            --include='*.ts' "$GBRAIN_SRC" 2>/dev/null \
            | grep -v '/ai/recipes/' || true)
 if [ -n "$REMAIN" ]; then
-  echo "$REMAIN" | sed 's/^/[gbrain-patch]   LEFTOVER: /'
+  echo "$REMAIN" | sed 's/^/[gbrain-patch]   LEFTOVER: /' >&2
   echo "[gbrain-patch] ⚠️  $(echo "$REMAIN" | wc -l | tr -d ' ') leftover default(s) — update REPLACEMENTS in this script." >&2
-else
-  echo "[gbrain-patch] ✓ 0 remaining native-anthropic model defaults."
+  echo "[gbrain-patch] ERROR: native-anthropic model default(s) remain after patch — gbrain added a NEW touchpoint. RE-POINT THIS PATCH (see UPGRADING_GBRAIN.md)." >&2
+  echo "[gbrain-patch] FAILING THE BUILD (the old container keeps serving — no outage), same as the mcp-allowlist patch." >&2
+  exit 1
 fi
+echo "[gbrain-patch] ✓ 0 remaining native-anthropic model defaults."
 echo "[gbrain-patch] done."

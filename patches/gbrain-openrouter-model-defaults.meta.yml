@@ -8,7 +8,7 @@ category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-openrouter-model-defaults.sh
-source_sha: "435c2a519cfb5ed8b773cf23af18d0beaf4a920e732921241d55dc5f586e2e7f"
+source_sha: "9ebf5e55a13240381f063626206d9f3fd94300131e686257038091f3bb90b657"
 # anchor: a stable string the patch depends on finding in the gbrain source.
 # Checked present in the PATCH BODY by --check; if gbrain renames it the patch
 # itself fails the Docker build.
