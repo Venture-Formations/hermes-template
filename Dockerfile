@@ -153,6 +153,18 @@ RUN bash /app/patches/gbrain-source-pages-mentions-only.sh && \
 RUN bash /app/patches/gbrain-enrich-cli-prompt-twin.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-link-type-endpoint-gate (FIX-TE-1) --------------
+# inferLinkType endpoint gate: *->person never typed; company->company founded -> mentions. MUST run after TE-2. Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container
+# keeps serving) if an anchor moves. See patches/gbrain-link-type-endpoint-gate.meta.yml.
+RUN bash /app/patches/gbrain-link-type-endpoint-gate.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-timeline-writer-fixes (FIX-TL-1/2/4) --------------
+# timeline date from source published_at; back-edges -> ## Mentions; ## Timeline sorted DESC. MUST run after TL-3. Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container
+# keeps serving) if an anchor moves. See patches/gbrain-timeline-writer-fixes.meta.yml.
+RUN bash /app/patches/gbrain-timeline-writer-fixes.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-
