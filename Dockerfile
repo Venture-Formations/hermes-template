@@ -165,6 +165,16 @@ RUN bash /app/patches/gbrain-link-type-endpoint-gate.sh && \
 RUN bash /app/patches/gbrain-timeline-writer-fixes.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-takes-notable-claims (FIX-TK-2) --------------------
+# Render graded takes as ## Takes fences onto the entity pages a reader sees: adds
+# writeTakesToFence (Part A), mines source/person/company pages (Part B), routes each
+# take to the entity it's about + attributes the speaker (Part C). Surfaces the takes
+# the v0.42 pipeline already produces (bootstrap_enabled=true) but that died DB-only.
+# Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving) if an
+# anchor moves. See patches/gbrain-takes-notable-claims.meta.yml.
+RUN bash /app/patches/gbrain-takes-notable-claims.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

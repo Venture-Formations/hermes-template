@@ -1,0 +1,184 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+#
+# source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it — it
+# only VALIDATES (fails --check on mismatch). To fill after moving the .sh into
+# hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-takes-notable-claims.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check   # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+
+id: gbrain-takes-notable-claims
+title: "Route graded takes onto subject entity pages (markdown-first fence write + subject/speaker routing) (FIX-TK-2)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-takes-notable-claims.sh
+source_sha: "9969a838133ac5adbf4022502563daf0ec262f24a8e8cbcd281354453ccfbe16"
+
+# anchor: the primary anchor the patch body self-audits. There are several edit
+# sites across one file plus two new files; each anchor is grepped in the .sh
+# PREFLIGHT before any edit (a moved anchor fails the build). The PRIMARY anchor
+# is the DB-only flush site that Part C replaces.
+# gen-modifications.ts --check confirms this string is present in the .sh body.
+anchor: "claimsExtracted += await engine.addTakesBatch(batch);"
+
+# anchor_file_line: location of the primary anchor in the pinned gbrain tree.
+anchor_file_line: "src/core/extract-takes-from-pages.ts:155 (gbrain@099d9a8)"
+
+# Secondary anchors (each grepped in the .sh PREFLIGHT before the matching edit):
+#   Part B: "export const ALLOWED_PAGE_TYPES = ["
+#           + "  'concept', 'atom', 'lore', 'briefing', 'writing', 'originals',"
+#             -> src/core/extract-takes-from-pages.ts:20-21 (gbrain@099d9a8)
+#   Part C: "    for (let i = 0; i < claims.length; i++) {"  (loop opener)
+#           + "    if (batch.length >= 200) await flush();"  (loop terminator)
+#             -> src/core/extract-takes-from-pages.ts:201,213 (gbrain@099d9a8)
+#   Part C: "import { chat, isAvailable } from './ai/gateway.ts';" (import site)
+#             -> src/core/extract-takes-from-pages.ts:18 (gbrain@099d9a8)
+#   Part C: "  compiled_truth: string;" (PageRow tail — frontmatter added)
+#           + "    `SELECT id, slug, source_id, type, compiled_truth," (SELECT prefix)
+#             -> src/core/extract-takes-from-pages.ts:71,136 (gbrain@099d9a8)
+#   Part A: takes-fence.ts exports that the new fence-write.ts imports —
+#           upsertTakeRow / parseTakesFence / isValidHolder / TakeKind /
+#           TAKES_FENCE_BEGIN / TAKES_FENCE_END
+#             -> src/core/takes-fence.ts:454,238,146,43,106,107 (gbrain@099d9a8)
+# All anchors verified verbatim at the live pin; the patch was applied to a
+# throwaway copy of the v0.42.34.0 src tree and the full tree typechecks with
+# ZERO source errors (bunx tsc --noEmit), including the two new files.
+
+invariant: >
+  After build, src/core/takes/fence-write.ts (writeTakesToFence) and
+  src/core/takes/route.ts (resolveTakeSubjects + resolveSpeaker) exist and carry
+  the FIX-TK-2 sentinel; ALLOWED_PAGE_TYPES in extract-takes-from-pages.ts
+  includes 'source','person','company'; and extractTakesFromPages writes each
+  classified claim to the `## Takes` fence of every resolved SUBJECT entity page
+  (markdown-first, via writeTakesToFence) attributed to the page's speaker,
+  retaining the DB-only addTakesBatch path ONLY as the fallback sink for
+  stubGuardBlocked / legacyFallback / fenceWriteFailed and routing no-subject
+  claims to their origin page (no regression). The FIX-TK-2-WIRING sentinel is
+  present in extract-takes-from-pages.ts.
+
+target_files:
+  - "gbrain src/core/takes/fence-write.ts (NEW — Part A; writeTakesToFence, mirrors facts/fence-write.ts)"
+  - "gbrain src/core/takes/route.ts (NEW — Part C helpers; resolveTakeSubjects + resolveSpeaker)"
+  - "gbrain src/core/extract-takes-from-pages.ts:20-22 (Part B — ALLOWED_PAGE_TYPES widen)"
+  - "gbrain src/core/extract-takes-from-pages.ts:18,71,136,201-213 (Part C — imports, PageRow.frontmatter, SELECT, per-subject fence-write loop + per-run gazetteer/local_path decls)"
+
+why: >
+  The fidelity audit (docs/brain-audit-2026-06-05/03-fidelity-audit.md) measured
+  ~19% essence retention on entity pages: the brain keeps commodity facts and
+  loses the analyst TAKES (quantified/contrarian/predictive claims). The v0.42
+  takes pipeline is ALREADY RUNNING on the live container
+  (takes.bootstrap_enabled=true) but its value is thrown on the floor — three
+  confirmed code gaps. (1) No writeTakesToFence: extract-takes-from-pages.ts
+  flushes via engine.addTakesBatch (DB-only INSERT); the `## Takes` fence
+  renderer/parser exist (takes-fence.ts) but nothing on the write path calls
+  them, so a take never lands in the page BODY and compiled_truth IS the body
+  (markdown.ts) — invisible to get_page / a reader. Facts solved this in v0.32.2
+  with writeFactsToFence. (2) ALLOWED_PAGE_TYPES skips source/person/company —
+  the page types that carry the alpha (source transcripts; entity pages). (3) No
+  subject routing / holder attribution: every take is keyed to the page it was
+  READ from and authored by 'system', not routed to the entity it is ABOUT nor
+  attributed to the speaker (facts/backstop.ts:425 "Phase 5: fence-write per
+  entity" already does this). The takes table is PAGE-SCOPED
+  (UNIQUE (page_id, row_num)) — the page IS the subject, holder is the speaker —
+  so there is NO schema migration; this is purely code, mirroring the facts model.
+
+reapply: docker-build
+
+deprecate_when: >
+  The FIX-TK-2 design is merged upstream into garrytan/gbrain (a PR adding a
+  markdown-first take write path + subject/speaker routing to the takes
+  extractor) AND GBRAIN_REF is bumped past that commit. At that point the
+  upstream extractor writes takes to entity-page fences natively; remove this
+  patch and confirm `gbrain takes extract --from-pages` over a source page
+  produces a `## Takes` fence on the resolved entity page without it.
+
+added: "2026-06-08"
+last_validated_ref: "099d9a8"
+anchor_verified: >
+  2026-06-08: at gbrain@099d9a8 (v0.42.34.0), the takes core files are FLAT under
+  src/core/ (NOT src/core/takes/ — that dir does not exist; the patch CREATES it
+  for the two new files). All primary/secondary anchors verified verbatim:
+  addTakesBatch flush at extract-takes-from-pages.ts:155; ALLOWED_PAGE_TYPES at
+  :20-22; per-page push-loop at :201-213; ai/gateway import at :18; PageRow at
+  :66-73 (no frontmatter field — the patch adds it); eligible-pages SELECT at
+  :136 (no frontmatter column — the patch adds COALESCE(frontmatter,'{}')). New
+  fence-write.ts imports verified present in takes-fence.ts (upsertTakeRow:454,
+  parseTakesFence:238, isValidHolder:146, TakeKind:43, fence markers:106-107),
+  engine.ts (BrainEngine:646, TakeBatchInput:245, addTakesBatch:1402,
+  executeRaw:1956, getLinks:1140) and page-lock.ts (withPageLock:148). route.ts
+  imports verified: extractEntityRefs (link-extraction.ts:300), buildGazetteer
+  /findMentionedEntities/Gazetteer (by-mention.ts:155/229/74), resolveEntitySlug
+  (entities/resolve.ts:41), lookupSourceLocalPath (facts/fence-write.ts:288),
+  Page+Link (types.ts:79/1153 — NOTE Link is NOT re-exported by engine.ts, must
+  import from types.ts). Patch applied to a throwaway copy of the v0.42.34.0 src
+  tree; full-tree `bunx tsc --noEmit` reports ZERO source errors and a second
+  run is a clean no-op (idempotent).
+
+upstream: garrytan/gbrain
+# UPSTREAM CANDIDATE: yes (preferred home). Part A (writeTakesToFence) is a clean
+# new file; Parts B/C change WHAT gets extracted and WHERE it lands — a
+# behavioral change to a pipeline gated behind an eval suite upstream
+# (extract-takes-from-pages.ts:11-13: autopilot deliberately manual_only until a
+# 100+-case eval suite lands). The routing should ride that same eval discipline,
+# so a reviewed PR to garrytan/gbrain is the durable home; this build-time patch
+# is the interim carry across GBRAIN_REF bumps.
+
+# ── Operator doc fields (required by UPGRADE-EVALUATION.md) ─────────────────
+
+undo: >
+  1. Remove patches/gbrain-takes-notable-claims.sh and
+     patches/gbrain-takes-notable-claims.meta.yml from hermes-template.
+  2. Drop the `RUN bash /app/patches/gbrain-takes-notable-claims.sh` block from
+     the hermes-template Dockerfile (deploy/venture-formations-fork).
+  3. Run `bun run tools/gen-modifications.ts` in hermes-template to regenerate
+     MODIFICATIONS.md + lock (deleted entry must be absent).
+  4. Commit both repos (hermes-template + hermes-workspace registry), trigger a
+     Railway rebuild. The new container's extractor reverts to DB-only takes;
+     entity pages stop gaining new `## Takes` fences. Existing fences already on
+     disk are git-canonical and remain (gbrain sync keeps re-deriving their DB
+     rows) — to also strip them, remove the `## Takes` fences from the affected
+     entity pages in hermes-brain.
+
+redo: >
+  The Docker build RUN block re-applies the .sh automatically after each
+  `bun install -g github:garrytan/gbrain` call in the Dockerfile. Idempotent:
+  the FIX-TK-2 sentinel (in the two new files) and the FIX-TK-2-WIRING sentinel
+  (in extract-takes-from-pages.ts), plus the ALLOWED_PAGE_TYPES / _takeLocalPathCache
+  already-applied greps, make a second run a no-op. PREFLIGHT anchors are
+  substring-stable so the self-audit stays green after the patch's own edits.
+
+upgrade_eval: >
+  1. Re-grep every PREFLIGHT anchor (see Secondary anchors above) at the new
+     GBRAIN_REF. If any is absent the Docker build already failed (re-point the
+     .sh). NOTE the takes files are FLAT under src/core/ at the pin — if upstream
+     introduces a real src/core/takes/ dir, reconcile the new-file placement and
+     the './takes/...' import paths in the Part-C wiring.
+  2. Re-confirm the v0.42.26.0 → 099d9a8 drift the draft already corrected stays
+     correct: TakeBatchInput date columns are since_date/until_date (engine.ts);
+     pages slugs are per-source (scope the page_id lookup by source_id); `Link`
+     is NOT re-exported by engine.ts (import from types.ts).
+  3. Check if gbrain added a markdown-first take write path / subject routing
+     upstream (a writeTakesToFence equivalent, or ALLOWED_PAGE_TYPES already
+     covering source/person/company with per-entity routing). If so the
+     deprecate_when condition is met — remove the patch and confirm entity pages
+     gain `## Takes` fences in the new install without it.
+  4. Invariant re-confirm (verify-upgrade.sh): the two new files exist with the
+     FIX-TK-2 sentinel, ALLOWED_PAGE_TYPES includes source/person/company, and
+     the FIX-TK-2-WIRING sentinel is present in extract-takes-from-pages.ts.
+  5. Bump last_validated_ref to the new gbrain@<commit>.
+
+rollback_speed: >
+  Fail-safe: any broken PREFLIGHT anchor exits the .sh non-zero → Docker build
+  fails → old container keeps serving, no outage. The only live-container risk
+  is a silently-misapplied patch, which verify-upgrade.sh step 4 catches. RISK
+  is HIGH because Parts B/C change extractor behavior (what is mined + where it
+  lands) — but the change is markdown-first (git-canonical, reversible by editing
+  fences) and preserves the DB-only fallback + the no-subject→origin-page path.
