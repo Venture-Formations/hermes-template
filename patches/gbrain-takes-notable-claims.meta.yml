@@ -20,7 +20,7 @@ category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-takes-notable-claims.sh
-source_sha: "9969a838133ac5adbf4022502563daf0ec262f24a8e8cbcd281354453ccfbe16"
+source_sha: "29d1c6d0e404236d3d2f7d332c1974b2f2b67f095d6a1b14f56e1c21ac320e1b"
 
 # anchor: the primary anchor the patch body self-audits. There are several edit
 # sites across one file plus two new files; each anchor is grepped in the .sh

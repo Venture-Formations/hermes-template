@@ -259,6 +259,39 @@ export interface TakeFenceWriteResult {
   stubGuardBlocked?: true;
 }
 
+/**
+ * FIX-TK-2: filler words dropped during claim normalization. These are the
+ * articles / hedges / approximation qualifiers that a paraphrase swaps in or
+ * out without changing the underlying assertion ("one of ONLY three" vs "one
+ * of three"; "ROUGHLY $40B" vs "$40B"). Deliberately SMALL and conservative —
+ * it must NOT include any word whose presence/absence changes meaning, and it
+ * NEVER touches digits, so two claims with different numbers or entities stay
+ * distinct.
+ */
+const _CLAIM_FILLER_WORDS = new Set([
+  'the', 'a', 'an', 'of', 'is', 'are', 'to', 'in', 'for', 'and',
+  'only', 'nearly', 'roughly', 'about', 'approximately', 'around',
+  'circa',
+]);
+
+/**
+ * FIX-TK-2: normalize a claim to a dedup key. Lowercase, replace every
+ * non-alphanumeric run with a single space, drop filler words, collapse and
+ * trim whitespace. Digits are PRESERVED (and word-internal alphanumerics like
+ * "37.4b" → "37 4b" stay), so distinct numbers/entities produce distinct keys
+ * — only filler-word rewordings of the same assertion collapse to one key.
+ * Returns '' when the claim has no alphanumeric content.
+ */
+function _normClaim(claim: string): string {
+  return (claim ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((w) => w && !_CLAIM_FILLER_WORDS.has(w))
+    .join(' ')
+    .trim();
+}
+
 /** Minimum canonical body for a brand-new entity page (mirrors facts stubEntityPage). */
 function stubEntityPage(slug: string): string {
   const prefix = slug.split('/')[0];
@@ -321,8 +354,28 @@ export async function writeTakesToFence(
       }
 
       // 2. Append each take to the `## Takes` fence (append-only; monotonic row_num).
+      //    FIX-TK-2: normalized-claim dedup. The extractor re-runs over the same
+      //    source pages and frequently re-emits a reworded restatement of a claim
+      //    already on the fence ("one of only three HBM suppliers" vs "one of
+      //    three HBM suppliers"). Suppress those near-duplicates so the fence
+      //    doesn't accrete paraphrases. CRITICAL: we DO NOT strip digits — two
+      //    claims with different NUMBERS or ENTITIES normalize differently and
+      //    both survive ("$37.4B revenue" != "$23.86B revenue"); only filler-word
+      //    rewordings collapse. Seed the dedup set from the claims ALREADY in the
+      //    fence so a re-run is idempotent.
+      const seenClaims = new Set<string>();
+      for (const pt of parseTakesFence(body).takes) {
+        const k = _normClaim(pt.claim);
+        if (k) seenClaims.add(k);
+      }
       const rowNums: number[] = [];
+      const insertedTakes: FenceInputTake[] = [];
       for (const t of takes) {
+        const key = _normClaim(t.claim);
+        // Empty after normalization (no alphanumerics) or already present
+        // (exact OR reworded restatement) → skip; don't append a duplicate row.
+        if (!key || seenClaims.has(key)) continue;
+        seenClaims.add(key);
         const holder = isValidHolder(t.holder) ? t.holder : 'system';
         const { body: updated, rowNum } = upsertTakeRow(body, {
           claim:     t.claim,
@@ -336,6 +389,7 @@ export async function writeTakesToFence(
         });
         body = updated;
         rowNums.push(rowNum);
+        insertedTakes.push(t);
       }
 
       // 3. Atomic write: .tmp → parse-validate → rename. Quarantine on failure.
@@ -369,7 +423,10 @@ export async function writeTakesToFence(
           // v0.42.26.0 draft used `since: t.sinceDate`, which both fails the
           // excess-property check on this literal AND would silently drop the
           // date even if it compiled. Corrected to since_date/until_date.
-          const batch: TakeBatchInput[] = takes.map((t, i) => ({
+          // FIX-TK-2: index ONLY the takes actually appended to the fence
+          // (insertedTakes), aligned 1:1 with rowNums. Dedup-suppressed takes
+          // are not on the fence, so they must not be stamped into the DB index.
+          const batch: TakeBatchInput[] = insertedTakes.map((t, i) => ({
             page_id: pageId,
             row_num: rowNums[i],
             claim: t.claim,
@@ -384,7 +441,7 @@ export async function writeTakesToFence(
           // VERIFIED 099d9a8: addTakesBatch(rows, opts?) → Promise<number>
           // (engine.ts:1402). Return value (insert count) is intentionally
           // ignored — `inserted` below reflects fence rows, the canonical truth.
-          await engine.addTakesBatch(batch);
+          if (batch.length > 0) await engine.addTakesBatch(batch);
         }
         // pageId undefined → brand-new stub not yet imported; next `gbrain sync`
         // parses the fence into the takes table. Markdown is the source of truth.
@@ -392,7 +449,9 @@ export async function writeTakesToFence(
         // Non-fatal: the fence (canonical) is written; DB index re-derives on sync.
       }
 
-      return { inserted: takes.length, rowNums };
+      // FIX-TK-2: report ACTUAL inserts (fence rows written), not the input
+      // length — dedup-suppressed near-duplicates are not counted.
+      return { inserted: rowNums.length, rowNums };
     },
     { timeoutMs: 5_000 },
   );
