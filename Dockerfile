@@ -129,6 +129,30 @@ RUN bash /app/patches/gbrain-openrouter-model-defaults.sh && \
 RUN bash /app/patches/gbrain-mcp-tool-allowlist.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-timeline-bullet-hyphen-split (FIX-TL-3) --------------
+# Timeline bullet parser: require spaced em/en dash separator (stop splitting slugs on bare hyphens). Idempotent + self-auditing: EXITS NON-ZERO and FAILS THE BUILD
+# (old container keeps serving) if its anchor moves. See patches/gbrain-timeline-bullet-hyphen-split.meta.yml.
+RUN bash /app/patches/gbrain-timeline-bullet-hyphen-split.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-enrich-skill-fidelity (FIX-EN-1/2) --------------
+# enrich skill: preserve sharpest verbatim claim + enforced contradiction/stance reconciliation. Idempotent + self-auditing: EXITS NON-ZERO and FAILS THE BUILD
+# (old container keeps serving) if its anchor moves. See patches/gbrain-enrich-skill-fidelity.meta.yml.
+RUN bash /app/patches/gbrain-enrich-skill-fidelity.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-source-pages-mentions-only (FIX-TE-2) --------------
+# link inference: type:source pages emit 'mentions' only (no false works_at/founded/invested_in). Idempotent + self-auditing: EXITS NON-ZERO and FAILS THE BUILD
+# (old container keeps serving) if its anchor moves. See patches/gbrain-source-pages-mentions-only.meta.yml.
+RUN bash /app/patches/gbrain-source-pages-mentions-only.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-enrich-cli-prompt-twin (FIX-EN-3) --------------
+# CLI enrich prompt twin of EN-1/2 (protective-only; cycle.enrich_thin default OFF). Idempotent + self-auditing: EXITS NON-ZERO and FAILS THE BUILD
+# (old container keeps serving) if its anchor moves. See patches/gbrain-enrich-cli-prompt-twin.meta.yml.
+RUN bash /app/patches/gbrain-enrich-cli-prompt-twin.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-
