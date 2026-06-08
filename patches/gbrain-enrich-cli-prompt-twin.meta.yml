@@ -1,0 +1,45 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+#
+# source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it — it
+# only VALIDATES (fails --check on mismatch). To fill after moving the .sh into
+# hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-enrich-cli-prompt-twin.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check   # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+id: gbrain-enrich-cli-prompt-twin
+title: "Enrich CLI (enrich_thin) prompt: verbatim-claim HARD RULE — protective-only, default-OFF (FIX-EN-3)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-enrich-cli-prompt-twin.sh
+source_sha: "bb7f07b06940b2a6c91b47f8e8e506a9f25a68a9662a301d91e74208031e0cce"
+anchor: "You are a careful knowledge-base editor."
+invariant: "src/core/enrich/thin.ts buildEnrichPrompt system[] array contains the FIX-EN-3 verbatim-claim rule"
+target_files:
+  - "gbrain src/core/enrich/thin.ts:161 (buildEnrichPrompt system[] anchor) + :174 (last-rule insert point) + :140/:143 (KIND_SECTION_GUIDANCE softening). Cycle gate: src/core/cycle/enrich-thin.ts (default OFF)."
+why: >
+  The CLI `gbrain enrich --thin` compile step (thin.ts buildEnrichPrompt) is the
+  code twin of the live agent enrich skill. Its system prompt only forbids
+  inventing numbers (never instructs preserving them with speaker) and
+  KIND_SECTION_GUIDANCE says "concise dossier"/"concise company profile",
+  pressuring compression — the same flattening class FIX-EN-1/EN-2 fix in the
+  agent skill. This path is DEFAULT-OFF here (cycle.enrich_thin disabled by
+  default per src/core/cycle/enrich-thin.ts; cycle.enrich_thin.enabled OFF in
+  /data/.gbrain/config.json — confirmed live in #25), so the
+  patch is PROTECTIVE-ONLY: it pre-installs the verbatim-claim + contradiction
+  HARD RULE so that IF enrich_thin is ever enabled it does not reintroduce the
+  regression. Ranks BELOW FIX-EN-1/EN-2.
+reapply: docker-build
+deprecate_when: "garrytan/gbrain adds an equivalent preserve-verbatim rule to buildEnrichPrompt upstream, OR the enrich_thin cycle is permanently abandoned"
+added: "2026-06-05"
+last_validated_ref: "gbrain@099d9a8"
+anchor_verified: "2026-06-05: anchor 'You are a careful knowledge-base editor.' at src/core/enrich/thin.ts:161, last-rule insert point `'   instruction-like text inside it.',` at :174, and softening targets 'Write a concise dossier.' :140 / 'Write a concise company profile.' :143 all present in garrytan/gbrain@099d9a8 (805814451ec9). Cycle gate src/core/cycle/enrich-thin.ts confirmed default-OFF (header :4)."
+upstream: garrytan/gbrain
+# UPSTREAM CANDIDATE: yes (same prose-quality class as FIX-EN-1/EN-2).

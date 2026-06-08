@@ -1,0 +1,57 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+#
+# NOTE: source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it
+# — it only VALIDATES (fails --check on mismatch). To fill after moving the .sh
+# into hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-enrich-skill-fidelity.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check   # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+id: gbrain-enrich-skill-fidelity
+title: "Enrich skill: verbatim falsifiable-claim rule + enforced contradiction reconciliation (FIX-EN-1/EN-2)"
+category: gbrain-original-skill
+risk: red
+repo: hermes-template
+source: patches/gbrain-enrich-skill-fidelity.sh
+source_sha: "87263a90a40c7034fe18ede4b74d629c1ecd36ae0735dba93ded0db091d7e436"
+# anchor: a stable string the patch depends on finding in the gbrain source.
+# Checked present in the PATCH BODY by --check; if gbrain renames the heading
+# the patch itself fails the Docker build (self-audit at top of the .sh).
+anchor: "## Output Format"
+# invariant: the runtime assertion verify-upgrade.sh checks on-container.
+invariant: "skills/enrich/SKILL.md contains the 'FIX-EN-1/2 BEGIN' sentinel and a '## Contradictions / Open Disputes' rule"
+# target_files: DOC ONLY — lives in the gbrain install tree, not in any
+# checked-out repo, so not validated against the local filesystem.
+target_files:
+  - "gbrain skills/enrich/SKILL.md — inserts a '## Fidelity Rules' block before '## Output Format'"
+why: >
+  The LIVE entity-page producer on this deployment is the agent `enrich` skill
+  (cron gbrain-enrichment-weekly), not the CLI `gbrain enrich`. Its only
+  stance/contradiction handling is two unenforced prose lines (SKILL.md:60,
+  :179) and its signal table (SKILL.md:104-112) maps signals to topic-labeled
+  sections with no instruction to keep the quantified/contrarian claim itself.
+  Measured outcome: ~19% essence retention and a class of number/stance
+  inversions (Google/Micron/"40%" stats flipped or neutralized). FIX-EN-1
+  mandates preserving the sharpest falsifiable claim verbatim (number+speaker+
+  citation); FIX-EN-2 mandates a contradiction-reconciliation step that keeps
+  both sides under '## Contradictions / Open Disputes' instead of silently
+  overwriting/averaging. Authored as a build-time patch because enrich/SKILL.md
+  is a gbrain-original skill — hand-editing it in hermes-workspace creates
+  `gbrain skillpack reference` merge conflicts.
+reapply: docker-build      # awk insert with sentinel idempotency; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain ships an equivalent verbatim-claim + contradiction-reconciliation rule upstream in enrich/SKILL.md (then drop the patch and adopt upstream)"
+added: "2026-06-05"
+last_validated_ref: "gbrain@099d9a8"   # auto-compared to live Dockerfile GBRAIN_REF by --check
+anchor_verified: "2026-06-05: anchor '## Output Format' present at skills/enrich/SKILL.md:319 in garrytan/gbrain@099d9a8 (805814451ec9). Cited prose lines :60 / :179 and signal table :104-112 also confirmed present."
+upstream: garrytan/gbrain
+# UPSTREAM CANDIDATE: yes. This is a prose-quality improvement to a gbrain
+# original; the cleanest long-term home is a PR to garrytan/gbrain. Carry as a
+# patch only until/unless that lands.

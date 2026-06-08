@@ -1,0 +1,47 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+#
+# source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it — it
+# only VALIDATES (fails --check on mismatch). To fill after moving the .sh into
+# hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-source-pages-mentions-only.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check   # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+id: gbrain-source-pages-mentions-only
+title: "Exclude type:source pages from typed-verb link inference (mentions-only) (FIX-TE-2)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-source-pages-mentions-only.sh
+source_sha: "c08310a5f296316eedb39a59e2305939beba4b2b67ee8915482a12386abfa81a"
+anchor: "if (pageType === 'media') {"
+invariant: "src/core/link-extraction.ts inferLinkType returns 'mentions' for pageType 'source' before any verb regex runs"
+target_files:
+  - "gbrain src/core/link-extraction.ts:684 (inferLinkType media-guard; inserts a sibling source-guard)"
+why: >
+  inferLinkType applies tuned per-edge verb regexes (FOUNDED_RE / INVESTED_RE /
+  ADVISES_RE / WORKS_AT_RE) and person-page role priors to every non-media
+  page. type:source captures (web/article/feed bodies, transcripts) and
+  podcast episodes are RAW text ABOUT third parties — a transcript that quotes
+  "Sequoia invested in Acme" would mint a spurious invested_in edge FROM the
+  source page. The code already does this exclusion for type:media at the top
+  of the function (link-extraction.ts:684); podcasts are type:media so they are
+  already covered, but type:source web/article/feed captures are NOT. This
+  patch inserts a sibling early-return guard so source pages emit `mentions`
+  edges only. Narrow and low-risk — does NOT touch the BrainBench-calibrated
+  verb heuristics (that is the separate, upstream-bound FIX-TE-1).
+reapply: docker-build
+deprecate_when: "garrytan/gbrain gates verb inference by endpoint type upstream (e.g. FIX-TE-1 lands), making source pages mentions-only natively"
+added: "2026-06-05"
+last_validated_ref: "gbrain@099d9a8"
+anchor_verified: "2026-06-05: media-guard `if (pageType === 'media') {` at src/core/link-extraction.ts:684, inside `export function inferLinkType(...)` (:683); the 3-line media block (684-686) the perl splice matches is present verbatim in garrytan/gbrain@099d9a8 (805814451ec9)."
+upstream: garrytan/gbrain
+# UPSTREAM CANDIDATE: partial. The narrow source-exclusion is patch-safe to
+# carry locally; the broader endpoint/directionality gate (FIX-TE-1) is the
+# upstream item.

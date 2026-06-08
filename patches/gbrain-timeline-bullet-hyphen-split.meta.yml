@@ -1,0 +1,50 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+#
+# source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it — it
+# only VALIDATES (fails --check on mismatch). To fill after moving the .sh into
+# hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-timeline-bullet-hyphen-split.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check   # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+id: gbrain-timeline-bullet-hyphen-split
+title: "Timeline bullet parser: require spaced em/en dash separator (stop splitting slugs on bare hyphens) (FIX-TL-3)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-timeline-bullet-hyphen-split.sh
+source_sha: "6d89a690ac13fdd7ce0866cd9153f00dbc7b1ab8417ede09d62a031ebb9a5ab9"
+# anchor: the buggy regex literal the patch finds + rewrites. If gbrain changes
+# the parser the self-audit at the top of the .sh fails the Docker build.
+anchor: '/^-\s+\*\*(\d{4}-\d{2}-\d{2})\*\*\s*\|\s*(.+?)\s*[—–-]\s*(.+)$/gm'
+# invariant: verify-upgrade.sh on-container check.
+invariant: "src/commands/extract.ts bulletPattern uses an em/en/double-dash separator (not a bare ASCII hyphen) and the source-undefined push site defaults to 'markdown'"
+target_files:
+  - "gbrain src/commands/extract.ts:475 (bulletPattern) + :478 (push site)"
+why: >
+  extractTimelineFromContent's Format-1 bullet regex
+  (src/commands/extract.ts:475) splits a `**DATE** | source — summary` bullet
+  on the FIRST hyphen via a separator class `[—–-]` that includes a BARE ASCII
+  hyphen, against a non-greedy `(.+?)` source group. A back-link bullet like
+  `- **2026-06-01** | Referenced in [Hermes Agent](.../7JRHSo2F-Wk.md)` is
+  mangled to source='...7JRHSo2F', summary='Wk.md)' — splitting the YouTube id
+  on its hyphen. Observed in the 2026-06-01T01:08 extract batch (audit
+  01-company-legibility-audit.md:57, rows 6052/6057-6060); re-runs that
+  re-emitted the clean line created corrupt+clean duplicate timeline rows.
+  The patch requires the separator to be a SPACED em/en/double dash ( — / – /
+  -- ), never a bare single hyphen, and makes the source segment optional so a
+  summary-only bullet keeps its whole text. One regex, one anchor, lowest risk.
+reapply: docker-build      # perl literal replace with self-audit; re-runs after gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain fixes the bullet-separator regex upstream (drop the patch)"
+added: "2026-06-05"
+last_validated_ref: "gbrain@099d9a8"
+anchor_verified: "2026-06-05: buggy bulletPattern regex present VERBATIM at src/commands/extract.ts:475 and the push site `source: match[2].trim()` at :478 in garrytan/gbrain@099d9a8 (805814451ec9)."
+upstream: garrytan/gbrain
+# UPSTREAM CANDIDATE: yes — this is an unambiguous parser bug. File the fix
+# upstream; carry the patch only until it lands.
