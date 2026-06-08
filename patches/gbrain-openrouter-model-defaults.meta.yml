@@ -30,5 +30,5 @@ why: >
 reapply: docker-build      # idempotent sed; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "gbrain exposes a config knob for all LLM touchpoints, OR an ANTHROPIC_API_KEY is provisioned for this deployment"
 added: "2026-06-02"
-last_validated_ref: "gbrain@9a0bae8"   # auto-compared to live Dockerfile GBRAIN_REF by --check
+last_validated_ref: "gbrain@099d9a8"   # auto-compared to live Dockerfile GBRAIN_REF by --check
 upstream: garrytan/gbrain
