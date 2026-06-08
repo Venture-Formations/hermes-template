@@ -1,0 +1,184 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+#
+# source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it — it
+# only VALIDATES (fails --check on mismatch). To fill after moving the .sh into
+# hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-timeline-writer-fixes.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check  # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+
+id: gbrain-timeline-writer-fixes
+title: "Timeline writer: stable publish-date + Mentions segregation + sort-DESC (FIX-TL-1 + TL-2 + TL-4)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-timeline-writer-fixes.sh
+source_sha: "cdcc4cf29502189ef45a77014b03defc3092b1d215e73585dfedd741587dd3ed"
+
+# anchor: the primary anchor the patch body self-audits. There are three edit
+# blocks across two files; each has a secondary anchor checked in the .sh body
+# before the edit runs. The PRIMARY anchor is the TL-1 site (enrichment-service).
+# gen-modifications.ts --check confirms this string is present in the .sh body.
+anchor: "date: new Date().toISOString().split('T')[0] ?? '',"
+
+# anchor_file_line: location of the primary anchor in the pinned gbrain tree.
+anchor_file_line: "src/core/enrichment-service.ts:116 (gbrain@099d9a8)"
+
+# Secondary anchors (each checked inside the .sh before the corresponding edit):
+#   TL-2a: "return `- **${date}** | Referenced in [${sourceTitle}](${sourcePath})`;"
+#           -> src/commands/backlinks.ts:67 (gbrain@099d9a8)
+#   TL-2b/TL-4: "// Insert into Timeline section"
+#           -> src/commands/backlinks.ts:164 (gbrain@099d9a8)
+# All three verified verbatim at the live pin.
+
+# invariant: the runtime assertions verify-upgrade.sh checks on-container.
+invariant: >
+  (TL-1) src/core/enrichment-service.ts addTimelineEntry block contains the
+  FIX-TL-1-WRITER sentinel and uses published_at/captured_at frontmatter
+  precedence instead of new Date(); the old 'date: new Date().toISOString()...'
+  line is absent.
+  (TL-2) src/commands/backlinks.ts buildBacklinkEntry contains the FIX-TL-2-WRITER
+  sentinel and returns an undated '- Referenced in [...]' line (not a dated
+  '- **${date}** | Referenced in [...]' line).
+  (TL-4) src/commands/backlinks.ts fixBacklinkGaps contains the FIX-TL-4-WRITER
+  sentinel; the old '// Insert into Timeline section' block is absent; the
+  ## Mentions routing + ## Timeline sort blocks are present.
+
+target_files:
+  - "gbrain src/core/enrichment-service.ts:116 (addTimelineEntry date field; FIX-TL-1)"
+  - "gbrain src/commands/backlinks.ts:67 (buildBacklinkEntry return; FIX-TL-2a)"
+  - "gbrain src/commands/backlinks.ts:164 (fixBacklinkGaps insert block; FIX-TL-2b + TL-4)"
+
+why: >
+  Three related bugs turn the on-disk `## Timeline` section into crawl-dated
+  noise rather than a meaningful chronology. (1) FIX-TL-1: enrichEntity stamps
+  every DB timeline entry with `new Date()` (wall-clock NOW, enrichment-service.ts:116)
+  rather than the source page's actual publish date. `now()` defeats the
+  idempotency of the idx_timeline_dedup UNIQUE index on (page_id, date, summary,
+  source): two runs on different calendar days produce two distinct date values
+  and two rows. The fix resolves the date from the source page's frontmatter
+  using the precedence chain our collectors stamp (published_at → captured_at
+  → today as last resort). (2) FIX-TL-2: check-backlinks fix appends a dated
+  '- **DATE** | Referenced in [X](path)' line to every target's ## Timeline for
+  every bare back-edge (backlinks.ts:66-67 + 164-178) — every entity mention
+  becomes a dated timeline event, drowning real events in noise (~90% of rows
+  in the live brain are this class). Fix: route bare back-edges to a ## Mentions
+  section (new, undated list); ## Timeline is reserved for genuine dated events
+  from engine.addTimelineEntry. (3) FIX-TL-4: fixBacklinkGaps formerly inserted
+  into ## Timeline with no sort; entries accumulated in insert order rather than
+  reverse-chronological as the enrich template promises. With TL-2 blocking new
+  writes to ## Timeline, TL-4 adds a cleanup sort pass: whenever fixBacklinkGaps
+  writes a page it also re-sorts any existing ## Timeline section by date DESC.
+  Precondition: FIX-TL-3 (gbrain-timeline-bullet-hyphen-split) must be applied
+  first — the parser must be hyphen-safe before the writer changes what it emits.
+
+reapply: docker-build    # idempotent perl splices with per-sentinel no-op guards; re-runs after the gbrain install on every GBRAIN_REF bump
+
+deprecate_when: >
+  garrytan/gbrain fixes all three issues upstream:
+  (TL-1) enrichEntity derives timeline date from published_at/captured_at
+         frontmatter, not from new Date();
+  (TL-2) check-backlinks fix routes bare back-edges to ## Mentions, not ## Timeline;
+  (TL-4) fixBacklinkGaps sorts ## Timeline DESC after any write.
+  When all three are present in the installed tree, remove this patch, rebuild,
+  and confirm via verify-upgrade.sh that the sentinels' invariants hold naturally.
+  Partial deprecation is acceptable: deprecate individual sub-fixes (TL-1/TL-2/TL-4)
+  independently as they land upstream; keep the patch until all three are covered.
+
+added: "2026-06-08"
+last_validated_ref: "gbrain@099d9a8"
+anchor_verified: >
+  2026-06-08: TL-1 anchor 'date: new Date().toISOString().split(T)[0] ?? ','
+  at src/core/enrichment-service.ts:116 (inside addTimelineEntry try-block);
+  TL-2a anchor 'return `- **${date}** | Referenced in [...]`' at
+  src/commands/backlinks.ts:67 (buildBacklinkEntry); TL-2b/TL-4 anchor
+  '// Insert into Timeline section' at src/commands/backlinks.ts:164
+  (fixBacklinkGaps) — all three verified verbatim at gbrain@099d9a8.
+upstream: garrytan/gbrain
+# UPSTREAM CANDIDATE: YES (all three are unambiguous bugs). File upstream PRs
+# for each; carry the patch until they land. Ordering: TL-3 ships first
+# (parser must be hyphen-safe), then TL-1 (stable dates), then TL-2 + TL-4
+# (writer routing + sort). Lane C runbook 03-timeline-cleanup.sh is gated on
+# TL-1 being live — do not run the cleanup until the date is stable.
+
+# ── Operator doc fields (required by UPGRADE-EVALUATION.md) ─────────────────
+
+undo: >
+  1. Remove patches/gbrain-timeline-writer-fixes.sh and its .meta.yml from
+     hermes-template.
+  2. Drop the `RUN bash /app/patches/gbrain-timeline-writer-fixes.sh` Dockerfile
+     block (deploy/venture-formations-fork branch).
+  3. Run `bun run tools/gen-modifications.ts` in hermes-template, regenerate
+     MODIFICATIONS.md + lock; commit both repos.
+  4. Trigger Railway rebuild.
+  5. After deploy:
+     (TL-1) enrichEntity resumes stamping new Date() on all timeline entries.
+     The idx_timeline_dedup idempotency gate is defeated — re-runs on different
+     days accumulate duplicate rows. Run 03-timeline-cleanup.sh --apply to
+     re-dedup the newly minted rows (but note it will re-accumulate until TL-1
+     is restored).
+     (TL-2) check-backlinks fix resumes writing dated 'Referenced in' rows to
+     ## Timeline. Run 03-timeline-cleanup.sh --apply to clean the noise (same
+     caveat as TL-1 — re-accumulates until TL-2 is restored).
+     (TL-4) ## Timeline sections stop being sorted on write. Re-order is
+     cosmetic; no data is lost.
+
+redo: >
+  Docker build RUN block re-applies all three edits automatically after each
+  `bun install -g github:garrytan/gbrain#${GBRAIN_REF}`. Idempotent: each
+  sub-fix has its own sentinel check (FIX-TL-1-WRITER / FIX-TL-2-WRITER /
+  FIX-TL-4-WRITER); a second run is a no-op on any block already applied.
+  Precondition: gbrain-timeline-bullet-hyphen-split.sh (FIX-TL-3) must run
+  BEFORE this script in the Dockerfile (the parser must be hyphen-safe first).
+
+upgrade_eval: >
+  1. TL-1 anchor: `grep -nF "date: new Date().toISOString().split" src/core/enrichment-service.ts`
+     at the new GBRAIN_REF. If absent → the build already failed. If the
+     addTimelineEntry call was refactored (different date field name, different
+     block shape), re-point TL1_ANCHOR in the .sh.
+     Also confirm the gbrain-allow-direct-insert comment is still on the same
+     line (it is part of the OLD_BLOCK the perl splice matches — if gbrain
+     changed this comment, the match will fail at build time; re-point).
+  2. TL-2a anchor: `grep -nF "Referenced in \[" src/commands/backlinks.ts`
+     at the new GBRAIN_REF. Confirm buildBacklinkEntry still has the
+     '- **${date}** | Referenced in ...' return form (if gbrain already changed
+     it to an undated form, TL-2a deprecation condition is met).
+  3. TL-2b/TL-4 anchor: `grep -nF "// Insert into Timeline section" src/commands/backlinks.ts`
+     at the new GBRAIN_REF. If absent → the build already failed; re-point.
+     Confirm the 15-line fixBacklinkGaps insert block (the OLD block in the .sh)
+     is still verbatim — any upstream change to the Timeline insert logic means
+     the block shape changed; re-point TL24_OLD accordingly.
+  4. UPSTREAM FIX CHECK: for each of TL-1/TL-2/TL-4, check the gbrain release
+     changelog. If gbrain fixed a sub-item upstream:
+     (a) Remove the corresponding sub-block from the .sh (update the script
+         so it no longer applies that edit), OR
+     (b) Remove the whole patch if all three are fixed and the upstream versions
+         satisfy the invariants.
+     Confirm by running verify-upgrade.sh after the partial/full deprecation.
+  5. Lane C gate: `03-timeline-cleanup.sh` is gated on TL-1 being live (the
+     dedup key needs stable dates). After any upgrade, re-check whether the TL-1
+     sentinel is present in the installed enrichment-service.ts before running
+     the cleanup. If TL-1 was deprecated (upstream fixed), confirm the upstream
+     fix uses the same or compatible precedence chain (published_at → captured_at
+     → today) before running the cleanup.
+  6. Invariant re-confirm (verify-upgrade.sh): all three FIX-TL-*-WRITER
+     sentinels are present; the old 'date: new Date().toISOString()...' line and
+     the old '// Insert into Timeline section' block are absent.
+  7. Bump last_validated_ref.
+
+rollback_speed: >
+  Fail-safe: if any of the three anchor checks fails, the .sh exits non-zero →
+  Docker build fails → old container keeps serving. No outage. Re-point the
+  failed anchor and rebuild.
+  If a behavioral regression is discovered after a successful build, revert the
+  Dockerfile commit removing this patch's RUN line, push, and Railway rebuilds
+  (~3-5 min). Data written by the patched version (## Mentions sections, sorted
+  ## Timeline) is forward-compatible: ## Mentions is additive; Timeline sort is
+  idempotent. No compensating data migration is needed on rollback.
