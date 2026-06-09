@@ -1,0 +1,43 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-no-anthropic-reroute
+title: "Re-route native anthropic: model ids to OpenRouter at the resolveRecipe chokepoint (FIX-NA-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-no-anthropic-reroute.sh
+source_sha: "42f7e0e91bfe3e4656ceb83a0d752c20a858268a16e425abf7fd37309a8708e2"
+# anchor: the exact gbrain source line the patch injects after; checked present
+# in the PATCH BODY by --check. If gbrain moves/renames the resolveRecipe
+# chokepoint the patch FAILS THE BUILD (old container keeps serving), forcing a
+# re-point — never a silent no-op.
+anchor: "const parsed = parseModelId(modelId);"
+# invariant: runtime assertion verify-upgrade.sh + anthropic-scan.sh check.
+invariant: "src/core/ai/model-resolver.ts resolveRecipe contains the VF-FIX-NA-1 sentinel and re-routes a native anthropic: id with no ANTHROPIC_API_KEY to openrouter:auto; anthropic-scan.sh reports the guarantee holds (sentinel present + no un-allowlisted native-anthropic client construction)."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-no-anthropic-reroute.probe.sh
+target_files:
+  - "src/core/ai/model-resolver.ts"   # DOC ONLY — upstream gbrain file, not in any checked-out repo
+why: >
+  This deployment provisions no ANTHROPIC_API_KEY (operator decision: never a
+  native Anthropic dependency; OpenRouter may still route to Claude, billed via
+  OPENROUTER_API_KEY). gbrain hardcodes native `anthropic:` model defaults at
+  dozens of touchpoints with no global config knob; any that reach a native
+  anthropic recipe throw inside gateway.chat() and are swallowed silently
+  (facts/takes extractors return []/continue) -> the brain silently produces 0
+  facts. This REPLACES gbrain-openrouter-model-defaults.sh, which chased ~20
+  literals across a dozen files and could not keep up with a release-less master
+  (a new touchpoint in an unmatched shape = a fresh silent zero). gbrain resolves
+  EVERY model string through one chokepoint, resolveRecipe()/parseModelId() in
+  model-resolver.ts; injecting a single no-key reroute there subsumes all the
+  literals AND auto-covers any new touchpoint upstream adds. Paired with
+  anthropic-scan.sh (fail-closed bypass detector) and the loud-llm-failures patch
+  (re-raise instead of swallow) for triple coverage.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain stops hardcoding native anthropic: model defaults (goes provider-agnostic / fully config-driven), OR resolveRecipe gains its own no-ANTHROPIC_API_KEY reroute/guard upstream, OR an ANTHROPIC_API_KEY is provisioned for this deployment (operator has ruled this out). The still_needed_probe checks the first two automatically every upgrade."
+added: "2026-06-09"
+last_validated_ref: "gbrain@1eb430a"   # auto-compared to live Dockerfile GBRAIN_REF by --check
+upstream: garrytan/gbrain

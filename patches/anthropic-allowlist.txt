@@ -1,0 +1,25 @@
+# anthropic-allowlist.txt — reviewed-safe native-Anthropic references.
+#
+# anthropic-scan.sh hunts the installed gbrain tree for native-Anthropic client
+# CONSTRUCTION that could BYPASS the FIX-NA-1 resolveRecipe reroute (the single
+# chokepoint that re-routes native `anthropic:` ids → openrouter:auto when no
+# ANTHROPIC_API_KEY is set). A construction hit is SUPPRESSED only if its
+# `file:line:content` contains a substring listed below. Everything NOT listed
+# FAILS the build (fail-closed — "don't just have silent patch failures").
+#
+# Each entry MUST carry a `# reason`. When a gbrain upgrade introduces a
+# genuinely-safe new construction site, add it here WITH a reviewed reason in
+# the SAME commit (the registry pre-commit gate keeps this honest).
+#
+# NOTE: this allowlist is for CONSTRUCTION patterns only (new Anthropic(,
+# createAnthropic, @anthropic-ai/sdk, the 'native-anthropic' implementation
+# dispatch). Inert `anthropic:` references (pricing tables, the
+# `anthropic:messages` rate-lease key, CLI help text, init UX) do NOT match the
+# construction patterns and need no entry here.
+
+src/core/ai/recipes/anthropic.ts   # recipe DATA only: declares implementation:'native-anthropic'. Never builds a client outside resolveRecipe, which FIX-NA-1 reroutes upstream of construction.
+
+# --- added by first CI dry-run after reviewing the surfaced construction site(s) ---
+# (the canonical native-anthropic adapter/factory will appear here with a reason
+#  once anthropic-scan.sh names its exact path; until then the build fails
+#  closed and tells you precisely what to review.)
