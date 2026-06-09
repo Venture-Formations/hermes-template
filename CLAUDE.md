@@ -53,16 +53,18 @@ customizations (detailed in the sections below):
   → `/usr/local/bun`, **PINNED** to a specific commit via `ARG GBRAIN_REF` —
   bumped to a newer master commit by the "gbrain daily update watcher" routine;
   `unzip` added to apt) and the **youtube-collector deps** (`yt-dlp` + `ffmpeg`,
-  baked for the `youtube-playlist-sync` cron), plus the **gbrain core
-  model-default patch** (`COPY patches/` + `RUN bash
-  patches/gbrain-openrouter-model-defaults.sh` right after the bake — see
-  "gbrain core patch" below).
-- **`patches/gbrain-openrouter-model-defaults.sh`** — a gbrain CORE patch (the
-  authoritative list of all core patches is the generated
-  `hermes-workspace/MODIFICATIONS.md`). Rewrites gbrain's hardcoded native `anthropic:`
-  model defaults (~8 LLM touchpoints) to OpenRouter-routed equivalents so the
-  brain runs on `OPENROUTER_API_KEY` (we have no `ANTHROPIC_API_KEY`). Applied
-  at build time, re-applied on every `GBRAIN_REF` bump. **⚠️ must be
+  baked for the `youtube-playlist-sync` cron), plus the **gbrain core patches**
+  (`COPY patches/` + a `RUN bash patches/<patch>.sh` per patch right after the
+  bake — see "gbrain core patches" below).
+- **`patches/` — gbrain CORE patches** (the authoritative list is the generated
+  `hermes-workspace/MODIFICATIONS.md`). The load-bearing one is
+  **`gbrain-no-anthropic-reroute.sh` (FIX-NA-1)** + its fail-closed
+  **`anthropic-scan.sh`**: a single guard at gbrain's `resolveRecipe()` chokepoint
+  re-routes native `anthropic:` ids → `openrouter:auto` so the brain runs on
+  `OPENROUTER_API_KEY` (we have no `ANTHROPIC_API_KEY`). Replaces the retired
+  literal-rewrite `gbrain-openrouter-model-defaults.sh`. Each patch is applied at
+  build time, re-applied on every `GBRAIN_REF` bump, self-audits (fails the build
+  on anchor drift), and carries a `<id>.probe.sh` obsolescence check. **⚠️ must be
   re-validated on every gbrain upgrade** — see the dedicated section below and
   `UPGRADING_GBRAIN.md`.
 - **`start.sh`** — the **gbrain autopilot bootstrap** block (runs
@@ -218,37 +220,42 @@ image, re-applied on every `GBRAIN_REF` bump, idempotent, and each is followed b
 a `gbrain --version` smoke gate that fails the build if the patched tree won't
 load.
 
-> 🔁 **BOTH patches MUST be re-validated on every gbrain release/`GBRAIN_REF`
-> bump.** gbrain rewrites/moves the literals + line they anchor on. Each patch
+> 🔁 **EVERY core patch MUST be re-validated on every gbrain release/`GBRAIN_REF`
+> bump.** gbrain rewrites/moves the strings + lines they anchor on. Each patch
 > self-audits and **fails the build** (old container keeps serving — no outage)
-> if its anchor is gone, forcing a re-point. This is a required step in
-> `UPGRADING_GBRAIN.md`.
+> if its anchor is gone, forcing a re-point — never a silent no-op. Each patch
+> also carries a `<id>.probe.sh` (`still_needed_probe`) so the upgrade pipeline
+> can answer, per patch, "did gbrain fix this upstream, so retire it?" This is a
+> required step in `UPGRADING_GBRAIN.md`. The full set is in `MODIFICATIONS.md`;
+> the two below are the load-bearing ones to understand.
 
-### 1. `gbrain-openrouter-model-defaults.sh` — de-pin models to `openrouter:auto`
+### 1. `gbrain-no-anthropic-reroute.sh` (FIX-NA-1) — single-chokepoint no-Anthropic guard
 
 **Why.** A gbrain model string's provider prefix selects the API key:
-`anthropic:claude-haiku-4-5` → Anthropic API (`ANTHROPIC_API_KEY`);
-`openrouter:auto` → OpenRouter (`OPENROUTER_API_KEY`). This deployment has
-**only** `OPENROUTER_API_KEY` + `OPENAI_API_KEY` (no Anthropic key). gbrain
-hardcodes native `anthropic:` strings as the default for ~8 LLM touchpoints with
-**no config knob** (fact-dedup classifier, page synopsis, contextual-retrieval,
-`takes extract --from-pages`, contradiction judge, brainstorm, propose/grade
-takes, gateway chat/expansion). Those paths throw inside `chat()` and are
-swallowed silently. Setting `models.default`/`chat_model` only fixes
-config-backed paths; the patch rewrites the hardcoded literals.
+`anthropic:claude-sonnet-4-6` → Anthropic API (`ANTHROPIC_API_KEY`);
+`openrouter:auto` → OpenRouter (`OPENROUTER_API_KEY`, may still route to Claude).
+This deployment provisions **only** `OPENROUTER_API_KEY` + `OPENAI_API_KEY`
+(**never** a native Anthropic key — operator decision). gbrain hardcodes native
+`anthropic:` defaults at dozens of touchpoints with no global config knob; any
+that reach a native `anthropic:` recipe throw inside `chat()` and are swallowed
+silently → the brain produces 0 facts with `doctor` green.
 
-**As of 2026-06-04 the patch rewrites ALL of them to `openrouter:auto`** (was
-haiku/sonnet/opus) — operator chose fully-dynamic, no pinned models, mirroring
-the Hermes dashboard (main model = openrouter/auto, all aux tasks = "use main
-model"). Runtime config matches: `models.default`, `models.tier.subagent`, and
-`chat_model` are all `openrouter:auto` (DB config store + `/data/.gbrain/
-config.json`, both survive rebuilds). **⚠️ On upgrade the audit must report 0
-remaining `anthropic:claude-*` MODEL defaults** (pricing-table `anthropic:*`
-keys are inert metadata and may remain — they're not defaults; a side effect is
-slightly-off internal cost estimates for `openrouter:auto`, cosmetic). The native
-`anthropic:messages` rate-limit key is NOT a model — leave it. The prompt-cache
-`subagent_capability` WARN is now permanent-by-design (auto never caches) —
-accepted, informational, needs an Anthropic key to clear.
+**What it does (replaces the retired `gbrain-openrouter-model-defaults.sh`).** The
+old patch chased ~20 literals across a dozen files and audited "0 anthropic
+literals remain" — a coverage boundary that lost to a release-less master (a new
+touchpoint in an unmatched shape = a fresh silent zero). gbrain resolves EVERY
+model string through one chokepoint — `resolveRecipe()` / `parseModelId()` in
+`src/core/ai/model-resolver.ts` — so this patch injects a single guard there: a
+native `anthropic:` id with no `ANTHROPIC_API_KEY` re-routes to `openrouter:auto`.
+One site subsumes all the literals AND auto-covers any new touchpoint upstream
+adds; the literals can stay (harmless once rerouted). Companion **`anthropic-scan.sh`**
+(+ `anthropic-allowlist.txt`) runs right after and **fails the build closed** if
+the FIX-NA-1 sentinel is missing OR a native-anthropic client construction site
+bypasses the chokepoint. Paired with `gbrain-loud-llm-failures.sh` (makes the
+facts-extraction swallow LOUD) and the `gbrain-liveness` invariant for triple
+coverage. **⚠️ On upgrade:** if gbrain moves the `resolveRecipe` anchor, the patch
+fails the build — re-point it. `deprecate_when`: gbrain goes provider-agnostic /
+adds a global route knob (the `still_needed_probe` checks this automatically).
 
 ### 2. `gbrain-mcp-tool-allowlist.sh` — curated MCP tool surface
 

@@ -84,8 +84,9 @@ ENV PATH="/usr/local/bun/bin:$PATH"
 # gbrain ships via master (no GitHub release tags), so we pin a specific master
 # commit for reproducible builds. Bumping this ARG also busts Docker's layer
 # cache for the install below, forcing a fresh pull on upgrade.
-# Current: v0.42.37.0 — master @ 2026-06-09, commit 1eb430a. To upgrade: set
-# GBRAIN_REF to the new master sha, push this branch, then run `gbrain
+# Current: v0.42.37.0 — master @ 2026-06-09, commit 1eb430a (the no-anthropic
+# reroute + scan below were authored & validated against this tree). To upgrade:
+# set GBRAIN_REF to the new master sha, push this branch, then run `gbrain
 # post-upgrade` + verify-upgrade.sh on the container (UPGRADING_GBRAIN.md §0).
 ARG GBRAIN_REF=1eb430a2df9f842a754dd6af9910f049ccac65a1
 RUN curl -fsSL https://bun.sh/install | bash && \
@@ -94,24 +95,30 @@ RUN curl -fsSL https://bun.sh/install | bash && \
     # (Step 1: "gbrain --version should print a version number").
     gbrain --version
 
-# --- VF gbrain CORE patch: route hardcoded `anthropic:` model defaults -> OpenRouter
-# gbrain hardcodes native `anthropic:` model strings as the default for ~8 LLM
-# touchpoints (fact-dedup classifier, page synopsis, contextual-retrieval, takes
-# bootstrap, contradiction judge, brainstorm, propose/grade takes, gateway
-# chat/expansion). This deployment has only OPENROUTER_API_KEY + OPENAI_API_KEY
-# (no Anthropic key), so those paths throw inside chat() and are swallowed
-# silently (facts/takes return []/continue; fact-dedup degrades to cosine).
-# Setting `models.default`/`chat_model` only fixes config-backed paths; these
-# literals have no config knob, so we rewrite them to OpenRouter-routed
-# equivalents (same model + tier). This is the ONE place we modify gbrain CORE
-# (documented exception to the "never modify gbrain core" rule — see CLAUDE.md).
-# Re-applied on every rebuild so it survives GBRAIN_REF bumps; the post-patch
-# `gbrain --version` fails the build loudly if the patched tree won't load.
-# ⚠️ VALIDATE ON EVERY UPGRADE: gbrain may rename a model id / add a new
-# hardcoded touchpoint — the script's audit must report 0 leftovers (see
-# UPGRADING_GBRAIN.md). Idempotent + safe to re-run.
+# --- VF gbrain CORE patch: no-native-anthropic reroute (FIX-NA-1) ----------
+# This deployment provisions NO ANTHROPIC_API_KEY (operator: never a native
+# Anthropic dependency; OpenRouter may still route to Claude, billed via
+# OPENROUTER_API_KEY). gbrain hardcodes native `anthropic:` model defaults at
+# dozens of touchpoints with no global config knob; any that reach a native
+# anthropic recipe throw inside gateway.chat() and are swallowed silently
+# (facts/takes return []/continue) → the brain silently produces 0 facts.
+#
+# REPLACES the old literal-rewrite patch (gbrain-openrouter-model-defaults.sh),
+# which chased ~20 literals across a dozen files and could not keep up with a
+# release-less master (a new touchpoint in an unmatched shape = a fresh silent
+# zero). gbrain resolves EVERY model string through one chokepoint —
+# resolveRecipe()/parseModelId() in model-resolver.ts — so we inject a single
+# no-key reroute there: native `anthropic:` → openrouter:auto. One site subsumes
+# all the literals AND auto-covers any new touchpoint upstream adds.
+#
+# anthropic-scan.sh then PROVES the guarantee fail-closed (FIX-NA-1 sentinel
+# present + no un-allowlisted native-anthropic client construction bypasses the
+# chokepoint). Both run after the gbrain install; re-applied on every GBRAIN_REF
+# bump; idempotent. The reroute FAILS THE BUILD LOUDLY (old container keeps
+# serving) if its anchor moved — never a silent no-op. See UPGRADING_GBRAIN.md.
 COPY patches/ /app/patches/
-RUN bash /app/patches/gbrain-openrouter-model-defaults.sh && \
+RUN bash /app/patches/gbrain-no-anthropic-reroute.sh && \
+    bash /app/patches/anthropic-scan.sh && \
     gbrain --version
 
 # --- VF gbrain CORE patch #2: curated MCP tool allowlist -------------------
@@ -173,6 +180,16 @@ RUN bash /app/patches/gbrain-timeline-writer-fixes.sh && \
 # Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving) if an
 # anchor moves. See patches/gbrain-takes-notable-claims.meta.yml.
 RUN bash /app/patches/gbrain-takes-notable-claims.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-loud-llm-failures (FIX-LF-1) --------------
+# Make silently-swallowed LLM/gateway failures LOUD in facts extraction — the
+# audit's silent-zero "Face 2" (a chat-unavailable / swallowed chat() throw
+# becomes `return []` with no log, so a config-store split looks identical to an
+# empty corpus). Logs a tagged [VF-FIX-LF-1] line on each silent-return path; no
+# control-flow change. Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old
+# container keeps serving) if an anchor moved. See gbrain-loud-llm-failures.meta.yml.
+RUN bash /app/patches/gbrain-loud-llm-failures.sh && \
     gbrain --version
 
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
