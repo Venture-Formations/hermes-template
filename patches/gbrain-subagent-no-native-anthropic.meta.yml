@@ -11,7 +11,7 @@ source_sha: "0ede740dca896b0c1ccf425354228bc092e567db84a3d1743da6978bf77d3e12"
 # by --check). It is the gbrain native client-construction site the patch targets
 # (the two-line makeAnthropic default + eager client construction block).
 anchor: "const client: MessagesClient = deps.client ?? makeAnthropic().messages;"
-invariant: "src/core/minions/handlers/subagent.ts carries the VF-FIX-NA-2 guard: (1) the makeAnthropic default factory throws a tagged ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] Error when process.env.ANTHROPIC_API_KEY is unset, instead of silently constructing `new Anthropic()`; AND (2) the native `client` is LAZY (a Proxy over `__vfNativeClient` that constructs on first property access) so the throw fires only if the legacy path is actually exercised — NOT eagerly at handler construction (which ran on every worker.register and wedged the queue). The eager `deps.client ?? makeAnthropic().messages` must be gone."
+invariant: "src/core/minions/handlers/subagent.ts carries the VF-FIX-NA-2 guard: (1) the makeAnthropic default factory throws a tagged ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] Error when process.env.ANTHROPIC_API_KEY is unset, instead of silently constructing `new Anthropic()`; AND (2) the native `client` is LAZY (a Proxy over `__vfNativeClient` that constructs on first property access) so the throw fires only if the legacy path is actually exercised — NOT eagerly at handler construction (which ran on every worker.register and wedged the queue). The eager `deps.client ?? makeAnthropic().messages` must be gone. The Proxy is INERT to construct (the `get` trap, and only the trap, invokes makeAnthropic) and the gateway path (makeSubagentHandler's `if (useGatewayLoop) return runSubagentViaGateway(...)` early-return at ~L271, BEFORE the legacy `client.create(...)` at ~L506) never property-accesses it — so on a no-key gateway deployment this guard can neither throw at registration nor on the live path. OPERATIONAL DEPENDENCY: the live/baked config `agent.use_gateway_loop=true` (read via engine.getConfig, DB store) is what keeps the loop on the gateway→resolveRecipe→openrouter:auto route; this guard is the loud belt-and-suspenders for the day that flag is ever false/null (the legacy native path), turning a silent no-native-bypass into a named, non-wedging failure."
 still_needed_probe: patches/gbrain-subagent-no-native-anthropic.probe.sh
 target_files:
   - "src/core/minions/handlers/subagent.ts"   # DOC ONLY — upstream gbrain file
@@ -40,6 +40,16 @@ why: >
   `agent.use_gateway_loop=true`. With a key present, or an explicit deps.client /
   deps.makeAnthropic injected, behavior is unchanged. Replaces the prior
   anthropic-allowlist.txt entry for this file (it is now patched, not allowlisted).
+  KEEP-DECISION RE-VALIDATION (2026-06-09, ITEM 3): confirmed against gbrain@1eb430a
+  that the lazy form cannot throw at construction/registration (Proxy construction is
+  inert; the `get` trap is the only invoker of makeAnthropic, and the gateway path
+  early-returns at runSubagentViaGateway before ever accessing the Proxy — verified the
+  gateway fn body has zero `client` property reads). Net it adds REAL defense value: it
+  is the only loud guard on the legacy native-direct path (subagent client built via
+  makeAnthropic, NOT through resolveRecipe, so FIX-NA-1 cannot cover it) for the case
+  where agent.use_gateway_loop is ever false/null. DECISION: KEEP (lazy belt-and-
+  suspenders, post-PR-#16). The eager prior cut crash-looped the worker at every
+  worker.register and wedged the `default` queue for ~3h on 2026-06-09 (RCA above).
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain routes the subagent loop through the gateway / resolveRecipe upstream — i.e. the subagent handler no longer constructs a native `new Anthropic()` default outside the rerouted chokepoint. The still_needed_probe checks for the native fallback every upgrade."
 added: "2026-06-09"

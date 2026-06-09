@@ -270,6 +270,99 @@ V43EOF
   set +e
   if command -v gbrain >/dev/null 2>&1; then
     echo "[gbrain] $(gbrain --version 2>/dev/null) — installing autopilot (ephemeral-container, --no-inject)"
+
+    # --- DURABLE gateway-loop pin (FIX-NA-1 / FIX-NA-2 defense in depth) -------
+    # Runs on EVERY container start, BEFORE the autopilot daemon (and thus the
+    # Minions worker) launches, so the subagent loop is wired to route through
+    # the gateway -> resolveRecipe -> openrouter:auto and NEVER touches the legacy
+    # native `anthropic:` path. The subagent handler reads agent.use_gateway_loop
+    # via engine.getConfig (the DB-backed store), so `gbrain config set` is the
+    # correct store to write. Pinning it here makes gateway-loop routing durable:
+    # a config reset / DB-restore / fresh volume cannot silently re-expose the
+    # native path (which crash-looped the worker and wedged the default queue for
+    # ~3h on 2026-06-08). Idempotent (set-to-same-value is a no-op) and strictly
+    # non-fatal (`|| true`) — a config hiccup must never block the gateway.
+    echo "[gbrain-boot] pinning agent.use_gateway_loop=true (durable gateway-loop routing)"
+    gbrain config set agent.use_gateway_loop true 2>&1 | sed 's/^/[gbrain-boot] /' || true
+
+    # --- clear stale supervisor crash / gave-up record (boot-task health) ------
+    # gbrain has NO `supervisor-state.json`; the supervisor "gave up" / max_crashes
+    # signal lives in a weekly-rotated JSONL audit trail at
+    #   ${GBRAIN_AUDIT_DIR:-~/.gbrain/audit}/supervisor-YYYY-Www.jsonl
+    # (src/core/minions/handlers/supervisor-audit.ts + src/core/audit/audit-writer.ts).
+    # `gbrain doctor` / `gbrain jobs supervisor status` read current+previous ISO
+    # week and FAIL on the latest `max_crashes_exceeded` crash event — so after the
+    # FIX-NA-2 crash-loop, a FRESH healthy container keeps emitting a stale
+    # `[FAIL] supervisor` line for up to two weeks, false-flagging boot-task health
+    # purely on history. We prune ONLY the crash/gave-up rows (max_crashes_exceeded,
+    # health_error, worker_spawn_failed, and worker_exited lines whose likely_cause
+    # is not a clean exit) from the current + previous week files, preserving every
+    # clean lifecycle row (started / worker_spawned / clean worker_exited / etc.) so
+    # the verdict reflects the CURRENT run, not the resolved crash-loop. Runs before
+    # the supervisor re-launches. Idempotent (re-run on already-clean files removes
+    # nothing) and strictly non-fatal (`|| true`; missing files => no-op).
+    echo "[gbrain-boot] pruning stale supervisor crash/gave-up rows from weekly audit (boot-task health)"
+    if command -v bun >/dev/null 2>&1; then
+      cat > /tmp/_gbrain_clear_supervisor_crashes.ts <<'SUPEOF'
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+// Mirror gbrain's audit-dir + ISO-week filename resolution exactly so we touch
+// the SAME files doctor reads (src/core/audit/audit-writer.ts).
+const auditDir = (process.env.GBRAIN_AUDIT_DIR && process.env.GBRAIN_AUDIT_DIR.trim())
+  ? process.env.GBRAIN_AUDIT_DIR.trim()
+  : path.join(process.env.HOME || '.', '.gbrain', 'audit');
+function isoWeekFilename(prefix: string, now: Date): string {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);
+  const isoYear = d.getUTCFullYear();
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const ftDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - ftDayNum + 3);
+  const weekNum = Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86400000)) + 1;
+  return `${prefix}-${isoYear}-W${String(weekNum).padStart(2, '0')}.jsonl`;
+}
+// Clean-exit causes per supervisor-audit.ts CLEAN_EXIT_CAUSES — a worker_exited
+// with one of these is NOT a crash and must be preserved.
+const CLEAN = new Set(['clean_exit', 'graceful_shutdown', 'wedge_restart']);
+const now = new Date();
+const files = [isoWeekFilename('supervisor', now),
+               isoWeekFilename('supervisor', new Date(now.getTime() - 7 * 86400000))];
+let totalDropped = 0;
+for (const fn of files) {
+  const full = path.join(auditDir, fn);
+  let raw: string;
+  try { raw = fs.readFileSync(full, 'utf8'); } catch { continue; }
+  const kept: string[] = [];
+  let dropped = 0;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let obj: any;
+    try { obj = JSON.parse(line); } catch { kept.push(line); continue; } // keep unparseable verbatim
+    const ev = obj && obj.event;
+    let isCrash = false;
+    if (ev === 'max_crashes_exceeded' || ev === 'health_error' || ev === 'worker_spawn_failed') {
+      isCrash = true;
+    } else if (ev === 'worker_exited') {
+      const cause = obj.likely_cause as string | undefined;
+      if (cause === undefined) isCrash = (obj.code !== 0); // legacy fallback (matches isCrashExit)
+      else isCrash = !CLEAN.has(cause);
+    }
+    if (isCrash) dropped++; else kept.push(line);
+  }
+  if (dropped > 0) {
+    fs.writeFileSync(full, kept.length ? kept.join('\n') + '\n' : '', { encoding: 'utf8' });
+    totalDropped += dropped;
+    console.log(`pruned ${dropped} crash/gave-up row(s) from ${fn}`);
+  }
+}
+if (totalDropped === 0) console.log('no stale supervisor crash rows to prune (clean)');
+SUPEOF
+      GBRAIN_AUDIT_DIR="${GBRAIN_AUDIT_DIR}" bun /tmp/_gbrain_clear_supervisor_crashes.ts 2>&1 | sed 's/^/[gbrain-boot] /' || true
+    else
+      echo "[gbrain-boot] bun not on PATH; skipping supervisor crash-row prune (non-fatal)"
+    fi
+
     gbrain autopilot --install --no-inject 2>&1 | sed 's/^/[gbrain] /'
     if [ -f "$HOME/.gbrain/start-autopilot.sh" ]; then
       echo "[gbrain] launching autopilot daemon via $HOME/.gbrain/start-autopilot.sh"
