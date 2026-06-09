@@ -19,7 +19,16 @@
 
 src/core/ai/recipes/anthropic.ts   # recipe DATA only: declares implementation:'native-anthropic'. Never builds a client outside resolveRecipe, which FIX-NA-1 reroutes upstream of construction.
 
-# --- added by first CI dry-run after reviewing the surfaced construction site(s) ---
-# (the canonical native-anthropic adapter/factory will appear here with a reason
-#  once anthropic-scan.sh names its exact path; until then the build fails
-#  closed and tells you precisely what to review.)
+# --- reviewed 2026-06-09 against gbrain@1eb430a (first prod build surfaced these) ---
+# The CANONICAL native-anthropic client is built in the gateway, reached only via
+# resolveRecipe() — which FIX-NA-1 reroutes BEFORE construction when no ANTHROPIC_API_KEY.
+src/core/ai/gateway.ts        # canonical AI gateway: the one native-anthropic client (createAnthropic(...).languageModel) + the `case 'native-anthropic':` dispatch + the @ai-sdk/anthropic import. Construction is downstream of resolveRecipe, which FIX-NA-1 gates.
+# Declarative / type / comment hits — no client construction:
+src/core/ai/dims.ts           # provider-dimension table: a `case 'native-anthropic':` label only.
+src/core/ai/types.ts          # the 'native-anthropic' implementation type-union member — a type, not a client.
+src/core/ai/capabilities.ts   # historical comment about the pre-v0.38 Anthropic-direct path.
+src/core/think/index.ts       # `import type Anthropic` (type-only) + historical comments; runtime routes through the gateway.
+src/core/cycle/synthesize.ts  # `import type Anthropic` (type-only) + comment; construction moved to the gateway (reroute-gated).
+# Reviewed real-but-not-live construction sites:
+src/core/minions/handlers/subagent.ts   # subagent-loop SDK fallback `() => new Anthropic()`. This deployment pins models.tier.subagent=openrouter:auto so the native default is INERT; with no key any hit 401s LOUDLY (not silently) and gbrain-loud-llm-failures + the liveness probe catch it. HARDENING FOLLOW-UP: route the subagent loop through the gateway upstream.
+src/commands/eval-longmemeval.ts         # eval-only CLI command (LongMemEval benchmark); never a runtime ingestion/extraction/serve touchpoint.
