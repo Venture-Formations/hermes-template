@@ -192,6 +192,22 @@ RUN bash /app/patches/gbrain-takes-notable-claims.sh && \
 RUN bash /app/patches/gbrain-loud-llm-failures.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-subagent-no-native-anthropic (FIX-NA-2) ---
+# Close the ONE native-Anthropic path FIX-NA-1 does not cover: the subagent LLM
+# loop builds its client DIRECTLY (`makeAnthropic = deps.makeAnthropic ?? (() =>
+# new Anthropic())`), NOT through resolveRecipe — so on this no-ANTHROPIC_API_KEY
+# deployment that default would reach the Anthropic API directly, bypassing the
+# no-native guarantee. Minimal safe hardening: when no key is set the default
+# factory THROWS a tagged ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] (loud, named
+# for review) instead of silently constructing a native client; with a key (or an
+# explicit deps.makeAnthropic) behavior is unchanged. Does NOT re-architect the
+# loop through the gateway (the upstream deprecate_when). This replaces the prior
+# anthropic-allowlist.txt entry for subagent.ts (now patched, not allowlisted).
+# Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving)
+# if its anchor moved. See patches/gbrain-subagent-no-native-anthropic.meta.yml.
+RUN bash /app/patches/gbrain-subagent-no-native-anthropic.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

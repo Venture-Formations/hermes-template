@@ -62,6 +62,8 @@ invariant: >
   inferLinkType(pageType='person', context='works at Stripe', globalContext=undefined,
   targetSlug='companies/stripe') returns 'works_at' (intact positive case).
 
+still_needed_probe: patches/gbrain-link-type-endpoint-gate.probe.sh
+
 target_files:
   - "gbrain src/core/link-extraction.ts:693 (inferLinkType per-edge verb block; inserts two endpoint guards before the verb regexes)"
 
@@ -91,7 +93,7 @@ deprecate_when: >
   also gates source pages upstream.
 
 added: "2026-06-08"
-last_validated_ref: "gbrain@099d9a8"
+last_validated_ref: "gbrain@1eb430a"
 upstream: garrytan/gbrain
 
 # ── REQUIRED OPERATOR DOCUMENTATION ─────────────────────────────────────────

@@ -51,6 +51,8 @@ invariant: >
   sentinel; the old '// Insert into Timeline section' block is absent; the
   ## Mentions routing + ## Timeline sort blocks are present.
 
+still_needed_probe: patches/gbrain-timeline-writer-fixes.probe.sh
+
 target_files:
   - "gbrain src/core/enrichment-service.ts:116 (addTimelineEntry date field; FIX-TL-1)"
   - "gbrain src/commands/backlinks.ts:67 (buildBacklinkEntry return; FIX-TL-2a)"
@@ -93,7 +95,7 @@ deprecate_when: >
   independently as they land upstream; keep the patch until all three are covered.
 
 added: "2026-06-08"
-last_validated_ref: "gbrain@099d9a8"
+last_validated_ref: "gbrain@1eb430a"
 anchor_verified: >
   2026-06-08: TL-1 anchor 'date: new Date().toISOString().split(T)[0] ?? ','
   at src/core/enrichment-service.ts:116 (inside addTimelineEntry try-block);

@@ -226,8 +226,21 @@ V43EOF
         nohup sh -c 'gbrain extract --stale 2>&1; gbrain reindex --markdown 2>&1' > /tmp/gbrain-backfill.log 2>&1 &
         btlog "selfheal-full: DONE — reset GBRAIN_BOOT_TASK to post-upgrade after backfills finish"
         ;;
+      self-heal)
+        # Escalating self-heal ladder (in-place heals 1–6: migrations, RLS sweep,
+        # wedged-queue recover, re-apply core patches, embed/extract catch-up,
+        # verify+doctor gate). Runs the thin wrapper installed at /data/scripts/
+        # (forwards to _ops/scripts/self-heal.sh in the pulled workspace) so it
+        # tracks the latest pushed script without a rebuild. Idempotent and
+        # strictly non-fatal. SELF_REBUILD_ENABLED is deliberately LEFT UNSET so
+        # step 7 (Railway self-rebuild) stays OFF by default — never arm
+        # auto-rebuild from boot. Same script is driven on a cron tick.
+        btlog "self-heal: running /data/scripts/self-heal.sh (self-rebuild OFF — SELF_REBUILD_ENABLED unset)"
+        bash /data/scripts/self-heal.sh 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        btlog "self-heal: exit=${PIPESTATUS[0]}"
+        ;;
       *)
-        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify|selfheal-sync|selfheal-full) — skipping"
+        btlog "unknown task ${GBRAIN_BOOT_TASK} (known: post-upgrade|doctor|verify|selfheal-sync|selfheal-full|self-heal) — skipping"
         ;;
     esac
     btlog "task=${GBRAIN_BOOT_TASK} done"
