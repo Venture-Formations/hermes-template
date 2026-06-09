@@ -6,11 +6,12 @@ category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-subagent-no-native-anthropic.sh
-source_sha: "eead93664cb9871998e5570a2d1fe638d5155c28ebe87520ee9d0490a92a05d4"
+source_sha: "0ede740dca896b0c1ccf425354228bc092e567db84a3d1743da6978bf77d3e12"
 # anchor: a stable string the patch body depends on (checked present in the .sh
-# by --check). It is the gbrain native-fallback site the patch targets.
-anchor: "const makeAnthropic = deps.makeAnthropic ?? (() => new Anthropic());"
-invariant: "src/core/minions/handlers/subagent.ts carries the VF-FIX-NA-2 guard: the makeAnthropic default factory throws a tagged ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] Error when process.env.ANTHROPIC_API_KEY is unset, instead of silently constructing `new Anthropic()`."
+# by --check). It is the gbrain native client-construction site the patch targets
+# (the two-line makeAnthropic default + eager client construction block).
+anchor: "const client: MessagesClient = deps.client ?? makeAnthropic().messages;"
+invariant: "src/core/minions/handlers/subagent.ts carries the VF-FIX-NA-2 guard: (1) the makeAnthropic default factory throws a tagged ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] Error when process.env.ANTHROPIC_API_KEY is unset, instead of silently constructing `new Anthropic()`; AND (2) the native `client` is LAZY (a Proxy over `__vfNativeClient` that constructs on first property access) so the throw fires only if the legacy path is actually exercised — NOT eagerly at handler construction (which ran on every worker.register and wedged the queue). The eager `deps.client ?? makeAnthropic().messages` must be gone."
 still_needed_probe: patches/gbrain-subagent-no-native-anthropic.probe.sh
 target_files:
   - "src/core/minions/handlers/subagent.ts"   # DOC ONLY — upstream gbrain file
@@ -21,17 +22,24 @@ why: >
   client DIRECTLY via `const makeAnthropic = deps.makeAnthropic ?? (() => new
   Anthropic());`. On this deployment (NO ANTHROPIC_API_KEY) that default would
   build a native client and reach the Anthropic API directly, bypassing the
-  no-native guarantee. We pin models.tier.subagent=openrouter:auto so the native
-  default is inert in practice, but "inert by configuration" is a silent trap: a
-  config drift silently re-arms the native path. This patch is the MINIMAL safe
-  hardening — it replaces the silent native fallback with a GUARD that THROWS a
-  tagged, greppable ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] Error when no key
-  is set, so the path fails LOUD (named for review) instead of quietly calling
-  the Anthropic API. It does NOT re-architect the subagent loop through the
-  gateway (that is the upstream deprecate_when). With a key present, or an
-  explicit deps.makeAnthropic injected, behavior is unchanged. Replaces the
-  prior anthropic-allowlist.txt entry for this file (it is now patched, not
-  allowlisted).
+  no-native guarantee. The first cut of this patch made the makeAnthropic default
+  factory THROW when no key was set — but `makeSubagentHandler` invokes that factory
+  EAGERLY at handler-construction (`const client = deps.client ?? makeAnthropic()
+  .messages`), which runs at every `worker.register('subagent', ...)` on worker
+  startup, BEFORE any job and regardless of the gateway-vs-legacy loop path. So the
+  throw fired at registration and crash-looped the worker (~2.4s/spawn) → autopilot
+  hit max_crashes and gave up → the `default` job queue WEDGED (jobs waiting, 0
+  active, "worker alive but not claiming"). RCA 2026-06-09. This revision keeps the
+  loud tagged guard but makes the native `client` LAZY: a Proxy over `__vfNativeClient`
+  that constructs `makeAnthropic().messages` (and only then can throw) on FIRST
+  PROPERTY ACCESS — which only the legacy replay path does (via `client.create`). The
+  gateway-native loop (agent.use_gateway_loop=true, routed through resolveRecipe ->
+  openrouter:auto by FIX-NA-1) never touches this client, so a no-key gateway
+  deployment registers + drains cleanly while the legacy native path still fails LOUD
+  (named for review) if ever exercised without a key. Pair with the config
+  `agent.use_gateway_loop=true`. With a key present, or an explicit deps.client /
+  deps.makeAnthropic injected, behavior is unchanged. Replaces the prior
+  anthropic-allowlist.txt entry for this file (it is now patched, not allowlisted).
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain routes the subagent loop through the gateway / resolveRecipe upstream — i.e. the subagent handler no longer constructs a native `new Anthropic()` default outside the rerouted chokepoint. The still_needed_probe checks for the native fallback every upgrade."
 added: "2026-06-09"
