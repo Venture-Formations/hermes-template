@@ -84,10 +84,10 @@ ENV PATH="/usr/local/bun/bin:$PATH"
 # gbrain ships via master (no GitHub release tags), so we pin a specific master
 # commit for reproducible builds. Bumping this ARG also busts Docker's layer
 # cache for the install below, forcing a fresh pull on upgrade.
-# Current: v0.42.34.0 — master @ 2026-06-08, commit 099d9a8. To upgrade: set
+# Current: v0.42.37.0 — master @ 2026-06-09, commit 1eb430a. To upgrade: set
 # GBRAIN_REF to the new master sha, push this branch, then run `gbrain
 # post-upgrade` + verify-upgrade.sh on the container (UPGRADING_GBRAIN.md §0).
-ARG GBRAIN_REF=099d9a8f5505f1d64e4f4f784f8429cc2d47c18f
+ARG GBRAIN_REF=1eb430a2df9f842a754dd6af9910f049ccac65a1
 RUN curl -fsSL https://bun.sh/install | bash && \
     bun install -g github:garrytan/gbrain#${GBRAIN_REF} && \
     # Smoke check — fail the build loudly if the gbrain ref is unresolvable
