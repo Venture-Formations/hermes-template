@@ -25,6 +25,7 @@ source_sha: "6d89a690ac13fdd7ce0866cd9153f00dbc7b1ab8417ede09d62a031ebb9a5ab9"
 anchor: '/^-\s+\*\*(\d{4}-\d{2}-\d{2})\*\*\s*\|\s*(.+?)\s*[—–-]\s*(.+)$/gm'
 # invariant: verify-upgrade.sh on-container check.
 invariant: "src/commands/extract.ts bulletPattern uses an em/en/double-dash separator (not a bare ASCII hyphen) and the source-undefined push site defaults to 'markdown'"
+still_needed_probe: patches/gbrain-timeline-bullet-hyphen-split.probe.sh
 target_files:
   - "gbrain src/commands/extract.ts:475 (bulletPattern) + :478 (push site)"
 why: >
@@ -43,7 +44,7 @@ why: >
 reapply: docker-build      # perl literal replace with self-audit; re-runs after gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain fixes the bullet-separator regex upstream (drop the patch)"
 added: "2026-06-05"
-last_validated_ref: "gbrain@099d9a8"
+last_validated_ref: "gbrain@1eb430a"
 anchor_verified: "2026-06-05: buggy bulletPattern regex present VERBATIM at src/commands/extract.ts:475 and the push site `source: match[2].trim()` at :478 in garrytan/gbrain@099d9a8 (805814451ec9)."
 upstream: garrytan/gbrain
 # UPSTREAM CANDIDATE: yes — this is an unambiguous parser bug. File the fix

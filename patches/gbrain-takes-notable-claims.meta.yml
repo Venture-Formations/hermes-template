@@ -64,6 +64,8 @@ invariant: >
   claims to their origin page (no regression). The FIX-TK-2-WIRING sentinel is
   present in extract-takes-from-pages.ts.
 
+still_needed_probe: patches/gbrain-takes-notable-claims.probe.sh
+
 target_files:
   - "gbrain src/core/takes/fence-write.ts (NEW — Part A; writeTakesToFence, mirrors facts/fence-write.ts)"
   - "gbrain src/core/takes/route.ts (NEW — Part C helpers; resolveTakeSubjects + resolveSpeaker)"
@@ -101,7 +103,7 @@ deprecate_when: >
   produces a `## Takes` fence on the resolved entity page without it.
 
 added: "2026-06-08"
-last_validated_ref: "099d9a8"
+last_validated_ref: "gbrain@1eb430a"
 anchor_verified: >
   2026-06-08: at gbrain@099d9a8 (v0.42.34.0), the takes core files are FLAT under
   src/core/ (NOT src/core/takes/ — that dir does not exist; the patch CREATES it

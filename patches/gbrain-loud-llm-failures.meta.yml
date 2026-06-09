@@ -1,19 +1,21 @@
 # Source-of-truth metadata for a gbrain-core modification.
 # Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
 id: gbrain-loud-llm-failures
-title: "Make silently-swallowed LLM/gateway failures LOUD in facts extraction (FIX-LF-1)"
+title: "Make silently-swallowed LLM/gateway failures LOUD in facts extraction, classification, and takes extraction (FIX-LF-1)"
 category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-loud-llm-failures.sh
-source_sha: "15b27f0b1d4a70a75fb4fbfa6ac07432098850c375c7d9c6e89d49688feabbae"
+source_sha: "a9d38af6f569bb6c4352c7f78038152b16d995e10a8af35a11b5c5cb7717cd19"
 # anchor: a stable string the patch body depends on (checked present in the .sh
 # by --check). It is the gbrain swallow site the patch targets.
 anchor: "if (isAbort(err)) throw err;"
-invariant: "src/core/facts/extract.ts carries 2 VF-FIX-LF-1 console.error lines on the isAvailable('chat')->return[] path and the chat() catch->return[] path; the silent swallows now log a greppable [VF-FIX-LF-1] line."
+invariant: "4 VF-FIX-LF-1 console.error lines across 3 files: src/core/facts/extract.ts carries 2 (the isAvailable('chat')->return[] path and the chat() catch->return[] path), src/core/facts/classify.ts carries 1 (the classifier chat() catch->cosine_fallback degrade), and src/core/extract-takes-from-pages.ts carries 1 (the per-page chat() catch->continue); every silent LLM swallow now logs a greppable [VF-FIX-LF-1] line WITHOUT changing control flow."
 still_needed_probe: patches/gbrain-loud-llm-failures.probe.sh
 target_files:
-  - "src/core/facts/extract.ts"   # DOC ONLY — upstream gbrain file
+  - "src/core/facts/extract.ts"               # DOC ONLY — upstream gbrain file (2 sites)
+  - "src/core/facts/classify.ts"              # DOC ONLY — upstream gbrain file (1 site)
+  - "src/core/extract-takes-from-pages.ts"    # DOC ONLY — upstream gbrain file (1 site)
 why: >
   The audit's central failure mode ("Face 2"): gbrain transduces a config/provider
   problem into a silent zero. A chat gateway reported unavailable (model set in the
@@ -21,14 +23,16 @@ why: >
   0-facts saga), or a throw inside chat() (auth / provider-down / rate-lease /
   model-not-found), becomes `return []` with ZERO log lines, so a broken-config
   condition is indistinguishable from an empty corpus. This patch logs a tagged,
-  greppable [VF-FIX-LF-1] line on each silent-return path in facts/extract.ts WITHOUT
-  changing control flow (re-raising would break the put_page backstop), so the
-  liveness cron / verify-upgrade can correlate facts=0 with a real cause at the
-  moment it happens. NEXT ITERATION (same mechanism): add the classify.ts
-  cosine_fallback degrade and extract-takes-from-pages.ts catch->continue sites; the
-  gbrain-liveness invariant covers the aggregate silent-zero until then.
+  greppable [VF-FIX-LF-1] line on EVERY silent LLM-swallow path WITHOUT changing
+  control flow (re-raising would break the put_page backstop / the cosine fallback /
+  per-page progress), so the liveness cron / verify-upgrade can correlate facts=0
+  with a real cause at the moment it happens. Coverage is now 4 sites across 3 files:
+  facts/extract.ts (isAvailable('chat')->return[] and chat() catch->return[]),
+  facts/classify.ts (classifier chat() catch->cosine_fallback degrade), and
+  extract-takes-from-pages.ts (per-page chat() catch->continue). The gbrain-liveness
+  invariant covers the aggregate silent-zero as a backstop.
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
-deprecate_when: "garrytan/gbrain stops swallowing gateway failures silently in facts extraction — i.e. it logs (or re-raises) auth/provider errors instead of bare `return []`, OR removes the isAvailable('chat') short-circuit in favor of a surfaced error. The still_needed_probe checks the swallow gates every upgrade."
+deprecate_when: "garrytan/gbrain stops swallowing gateway failures silently across all four sites — i.e. it logs (or re-raises) auth/provider errors instead of a bare `return []` / silent cosine_fallback degrade / per-page `continue`, OR removes the isAvailable('chat') short-circuits in favor of a surfaced error. The still_needed_probe checks the swallow gates every upgrade."
 added: "2026-06-09"
 last_validated_ref: "gbrain@1eb430a"
 upstream: garrytan/gbrain

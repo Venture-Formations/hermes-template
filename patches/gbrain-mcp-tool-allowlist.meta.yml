@@ -14,6 +14,7 @@ source_sha: "352fd55646e9a6603d8bf608e7d2a56d0597057e554a101f976f0bd0c8046ae6"
 anchor: "operations.filter(op => !op.localOnly)"
 # invariant: runtime assertion verify-upgrade.sh checks on-container.
 invariant: "serve-http.ts contains the __gbAllow marker (allowlist patch applied)"
+still_needed_probe: patches/gbrain-mcp-tool-allowlist.probe.sh
 target_files:
   - "src/commands/serve-http.ts"   # DOC ONLY — upstream gbrain file, not in any checked-out repo
 why: >
@@ -27,5 +28,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "gbrain ships a native MCP tool-allowlist / scope-filtered tool list flag"
 added: "2026-06-04"
-last_validated_ref: "gbrain@099d9a8"   # auto-compared to live Dockerfile GBRAIN_REF by --check
+last_validated_ref: "gbrain@1eb430a"
 upstream: garrytan/gbrain

@@ -29,6 +29,17 @@ src/core/ai/types.ts          # the 'native-anthropic' implementation type-union
 src/core/ai/capabilities.ts   # historical comment about the pre-v0.38 Anthropic-direct path.
 src/core/think/index.ts       # `import type Anthropic` (type-only) + historical comments; runtime routes through the gateway.
 src/core/cycle/synthesize.ts  # `import type Anthropic` (type-only) + comment; construction moved to the gateway (reroute-gated).
-# Reviewed real-but-not-live construction sites:
-src/core/minions/handlers/subagent.ts   # subagent-loop SDK fallback `() => new Anthropic()`. This deployment pins models.tier.subagent=openrouter:auto so the native default is INERT; with no key any hit 401s LOUDLY (not silently) and gbrain-loud-llm-failures + the liveness probe catch it. HARDENING FOLLOW-UP: route the subagent loop through the gateway upstream.
+# --- updated 2026-06-09: the prior subagent.ts "INERT fallback" allowlist entry
+# was REMOVED — that file's native `() => new Anthropic()` default is no longer
+# an un-guarded bypass we merely tolerate. It is now PATCHED by
+# gbrain-subagent-no-native-anthropic.sh (FIX-NA-2): the makeAnthropic default
+# factory THROWS a tagged ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] when no
+# ANTHROPIC_API_KEY, so the native path fails LOUD instead of reaching Anthropic.
+# The narrowed call-form scan PATTERN still matches the `new Anthropic()`
+# construction (vanilla one-liner pre-patch at build line 121; the `return new
+# Anthropic()` past the key-check post-patch) — that construction is now downstream
+# of the FIX-NA-2 guard, exactly as gateway.ts createAnthropic( is downstream of
+# the FIX-NA-1 resolveRecipe reroute. So it stays allowlisted, but on GUARDED
+# grounds (FIX-NA-2), not the old INERT-by-config grounds.
+src/core/minions/handlers/subagent.ts   # native `new Anthropic()` construction is now GUARDED by FIX-NA-2 (gbrain-subagent-no-native-anthropic.sh): the makeAnthropic default throws ERR_NATIVE_ANTHROPIC_BLOCKED [VF-FIX-NA-2] when no ANTHROPIC_API_KEY, so it cannot silently reach Anthropic. Construction is downstream of that guard.
 src/commands/eval-longmemeval.ts         # eval-only CLI command (LongMemEval benchmark); never a runtime ingestion/extraction/serve touchpoint.

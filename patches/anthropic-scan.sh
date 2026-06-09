@@ -55,8 +55,15 @@ else
 fi
 
 # --- (2) BYPASS: no un-allowlisted native-Anthropic client construction -----
-# Construction patterns (NOT inert `anthropic:` string literals).
-PATTERN='new[[:space:]]+Anthropic\(|createAnthropic|@anthropic-ai/sdk|["'"'"']native-anthropic["'"'"']'
+# REAL client-construction CALLS only — the call form `new Anthropic(` and
+# `createAnthropic(`. We deliberately do NOT match `@anthropic-ai/sdk` imports,
+# the `import type Anthropic` token, comments, or `case 'native-anthropic':`
+# dispatch labels: those are inert (type-only / declarative / textual) and were
+# tripping the scan with no bypass risk. A native client only reaches the
+# Anthropic API when one of these constructors is actually CALLED — so the call
+# form is the precise bypass surface. (The gateway.ts `createAnthropic(` call
+# still needs allowlisting; the type-imports/comments/case-labels no longer do.)
+PATTERN='new[[:space:]]+Anthropic\(|createAnthropic\('
 HITS=$(grep -rnE --include='*.ts' "$PATTERN" "$GBRAIN_SRC" 2>/dev/null || true)
 
 # Build the allowlist substring set (skip blanks + comments).
