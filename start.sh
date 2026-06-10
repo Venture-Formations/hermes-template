@@ -282,8 +282,13 @@ V43EOF
     # native path (which crash-looped the worker and wedged the default queue for
     # ~3h on 2026-06-08). Idempotent (set-to-same-value is a no-op) and strictly
     # non-fatal (`|| true`) — a config hiccup must never block the gateway.
-    echo "[gbrain-boot] pinning agent.use_gateway_loop=true (durable gateway-loop routing)"
-    gbrain config set agent.use_gateway_loop true 2>&1 | sed 's/^/[gbrain-boot] /' || true
+    # --force is REQUIRED: agent.use_gateway_loop is a forward-compat key that
+    # gbrain does not recognize in this version, so a plain `config set` rejects
+    # it as "Unknown config key" and no-ops (gbrain's own message: "If this is
+    # intentional ... re-run with --force"). --force writes it anyway so the
+    # value is durably persisted for whenever the subagent handler reads it.
+    echo "[gbrain-boot] pinning agent.use_gateway_loop=true --force (durable gateway-loop routing)"
+    gbrain config set agent.use_gateway_loop true --force 2>&1 | sed 's/^/[gbrain-boot] /' || true
 
     # --- clear stale supervisor crash / gave-up record (boot-task health) ------
     # gbrain has NO `supervisor-state.json`; the supervisor "gave up" / max_crashes
@@ -361,6 +366,119 @@ SUPEOF
       GBRAIN_AUDIT_DIR="${GBRAIN_AUDIT_DIR}" bun /tmp/_gbrain_clear_supervisor_crashes.ts 2>&1 | sed 's/^/[gbrain-boot] /' || true
     else
       echo "[gbrain-boot] bun not on PATH; skipping supervisor crash-row prune (non-fatal)"
+    fi
+
+    # --- orphaned-supervisor-lock reclaim poller (Cause B: deploy-wedge) -------
+    # CAUSE B. The Minions worker supervisor (`gbrain jobs supervisor`) is a
+    # queue-scoped singleton guarded by ONE row in gbrain_cycle_locks
+    # (id='gbrain-supervisor:default'): the holder refreshes ttl_expires_at +
+    # last_refreshed_at every 60s, with a 5-min TTL. On a Railway redeploy the
+    # OLD container is HARD-KILLED (SIGKILL, no graceful release) so its lock row
+    # is left behind with a ttl_expires_at up to 5 min in the FUTURE. gbrain's
+    # own acquire (tryAcquireDbLock in src/core/db-lock.ts) only steals via
+    # ON CONFLICT when `ttl_expires_at < NOW() AND last_refreshed_at < NOW() -
+    # stealGrace(~100s)`. The future-dated ttl_expires_at fails that gate, so the
+    # NEW container's supervisor CANNOT steal the row for up to ~5 min: its single
+    # acquire attempt returns null, MinionSupervisor.start() exits LOCK_HELD
+    # ("Supervisor already running ... Exiting."), and the default queue WEDGES
+    # (worker alive, 0 active, jobs unclaimed) until the TTL finally lapses. This
+    # recurred on a deploy earlier today (job #2452 sat unclaimed).
+    #
+    # THE SAFE SIGNAL. gbrain's OWN liveness model (classifyHolderLiveness in
+    # db-lock.ts) treats a CROSS-HOST holder that has stopped refreshing as dead
+    # (process.kill is meaningless across hosts/containers). We mirror exactly
+    # that: reclaim the lock ONLY when it is held by a DIFFERENT host AND has not
+    # refreshed in > 120s. We bypass ONLY the over-conservative future-ttl gate;
+    # we do NOT weaken the staleness signal.
+    #   - DIFFERENT host: the holder is some OTHER container. Our own live
+    #     supervisor (same hostname) is never matched, so we can't steal from
+    #     ourselves.
+    #   - > 120s since last refresh: the supervisor refreshes every 60s, and
+    #     gbrain's steal-grace is ~100s (resolveStealGraceSeconds(5) = 2×60s).
+    #     120s is past 2 refresh ticks AND past gbrain's own grace, so a
+    #     genuinely-alive holder is never inside this window. During the Railway
+    #     deploy OVERLAP the OLD container is STILL alive and refreshing
+    #     (last_refreshed < 120s), so it is NOT reclaimed -> there is no risk of
+    #     two live supervisors. Only a hard-killed old container, which by
+    #     definition stops refreshing, ages past 120s and becomes reclaimable.
+    # The DELETE touches ONLY the one 'gbrain-supervisor:default' row and is a
+    # no-op every tick until the orphan is genuinely stale.
+    #
+    # WHY A BOUNDED BACKGROUND POLL, NOT A ONE-SHOT. At start.sh time during a
+    # deploy the OLD container is typically STILL alive and refreshing, so a
+    # one-shot reclaim would see last_refreshed < 120s and no-op, then the old
+    # container dies a few seconds/minutes later and the orphan sits for the full
+    # TTL — exactly the wedge. The poll has to OUTLIVE the overlap->old-death gap:
+    # it re-checks every ~20s for up to ~12 min and reclaims the moment the old
+    # holder crosses the 120s-stale line.
+    #
+    # SUPERVISOR NUDGE (see supervisor.ts MinionSupervisor.start): the supervisor
+    # acquires the lock EXACTLY ONCE — on failure it `process.exit(LOCK_HELD)`
+    # immediately, with NO retry timer. So the new container's supervisor that hit
+    # the wedge has already GIVEN UP and exited; the DELETE alone frees the row but
+    # nothing re-acquires it. We therefore nudge after the reclaim with
+    # `gbrain jobs supervisor start --detach` — gbrain's own canonical re-launch
+    # (doctor.ts remediation: "Restart with: gbrain jobs supervisor start
+    # --detach"). It forks a detached supervisor that runs a fresh acquire against
+    # the now-free row, and it is IDEMPOTENT: its O_CREAT|O_EXCL pidfile guard
+    # makes a redundant launch a no-op ("Supervisor already running ... Exiting."),
+    # which is the safe-by-construction message we observed. Strictly non-fatal.
+    echo "[gbrain-reclaim] arming orphaned-supervisor-lock reclaim poller (Cause B deploy-wedge guard)"
+    if command -v bun >/dev/null 2>&1 && [ -n "${DATABASE_URL}" ]; then
+      # Quoted heredoc: the bun snippet is taken literally (no shell expansion of
+      # $ / backticks). Hostname is read at RUNTIME via os.hostname() inside the
+      # script — the SAME value gbrain writes to holder_host — so the cross-host
+      # comparison is exact.
+      cat > /tmp/_gbrain_reclaim_supervisor_lock.ts <<'RECLAIMEOF'
+import { hostname } from 'node:os';
+const { SQL } = require('bun');
+const sql = new SQL(process.env.DATABASE_URL);
+const me = hostname();
+// LOAD-BEARING SAFETY CONTRACT — do NOT weaken this predicate. Reclaim ONLY a
+// DIFFERENT-host holder whose refresh is older than 120s (past gbrain's ~100s
+// steal-grace). Bypasses ONLY the future-ttl gate; touches ONLY this one row.
+const rows = await sql.unsafe(
+  `DELETE FROM gbrain_cycle_locks
+    WHERE id = 'gbrain-supervisor:default'
+      AND holder_host <> $1
+      AND (last_refreshed_at IS NULL
+           OR last_refreshed_at < NOW() - 120 * INTERVAL '1 second')
+   RETURNING holder_pid, holder_host, last_refreshed_at`,
+  [me],
+);
+await sql.end();
+if (rows.length > 0) {
+  const r = rows[0];
+  console.log(`reclaimed orphaned supervisor lock from dead container: ` +
+    `host=${r.holder_host} pid=${r.holder_pid} last_refresh=${r.last_refreshed_at} (this host=${me})`);
+  process.exit(10); // distinct "reclaimed" signal for the bash poll
+}
+process.exit(0);
+RECLAIMEOF
+      # Bounded background poll: ~20s cadency for up to ~720s (12 min), wrapped in
+      # `( set +e ... ) &` || true so it never blocks the gateway. On the FIRST
+      # reclaim it nudges the supervisor and stops; otherwise it logs that the
+      # poll finished clean and exits. Backgrounded BEFORE `gbrain autopilot
+      # --install` / before `exec python /app/server.py` so it outlives the
+      # deploy overlap->old-death gap.
+      (
+        set +e
+        reclaim_deadline=$(( $(date +%s) + 720 ))
+        while [ "$(date +%s)" -lt "${reclaim_deadline}" ]; do
+          out="$(bun /tmp/_gbrain_reclaim_supervisor_lock.ts 2>&1)"; rc=$?
+          if [ -n "${out}" ]; then echo "${out}" | sed 's/^/[gbrain-reclaim] /'; fi
+          if [ "${rc}" -eq 10 ]; then
+            echo "[gbrain-reclaim] orphan reclaimed — nudging a fresh supervisor (jobs supervisor start --detach)"
+            gbrain jobs supervisor start --detach 2>&1 | sed 's/^/[gbrain-reclaim] /' || true
+            break
+          fi
+          sleep 20
+        done
+        echo "[gbrain-reclaim] reclaim poll finished"
+      ) &
+      echo "[gbrain-reclaim] reclaim poller backgrounded (pid $!; ~20s ticks for up to ~12 min)"
+    else
+      echo "[gbrain-reclaim] bun not on PATH or DATABASE_URL empty; skipping reclaim poller (non-fatal)"
     fi
 
     gbrain autopilot --install --no-inject 2>&1 | sed 's/^/[gbrain] /'
