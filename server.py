@@ -839,6 +839,30 @@ class Dashboard:
         if self.proc and self.proc.returncode is None:
             return
         try:
+            # `hermes dashboard --tui` exposed /api/pty + /api/ws + /api/events for
+            # the embedded Chat tab in hermes v2026.4.23 .. v0.15.x. In hermes
+            # v0.16.0 (v2026.6.5) `--tui` was REPURPOSED into a top-level TUI-REPL
+            # flag and REMOVED from the `dashboard` subparser (which now always
+            # exposes those endpoints). So `dashboard --tui` on v0.16.0 fails with
+            # "unrecognized arguments: --tui" and the dashboard dies on boot.
+            # Probe this build's `dashboard --help` and include --tui only if it's
+            # still a dashboard flag — version-agnostic, survives up/downgrades.
+            tui_arg: list[str] = []
+            try:
+                _h = await asyncio.create_subprocess_exec(
+                    "hermes", "dashboard", "--help",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                _out, _ = await _h.communicate()
+                if b"--tui" in (_out or b""):
+                    tui_arg = ["--tui"]
+                else:
+                    print("[dashboard] this hermes build's `dashboard` has no --tui "
+                          "(>=v0.16.0); launching without it (PTY endpoints are default).",
+                          flush=True)
+            except Exception as _e:
+                print(f"[dashboard] --tui capability probe failed ({_e!r}); launching without it", flush=True)
             self.proc = await asyncio.create_subprocess_exec(
                 "hermes", "dashboard",
                 "--host", HERMES_DASHBOARD_HOST,
@@ -849,12 +873,7 @@ class Dashboard:
                 # hermes to trust that dist and skip its npm build check,
                 # which would otherwise add ~30s to first startup (hermes >= v2026.5.16).
                 "--skip-build",
-                # --tui exposes /api/pty + /api/ws + /api/events so the
-                # dashboard's embedded Chat tab works end-to-end. Requires
-                # hermes >= v2026.4.23 — older releases exit immediately
-                # with "unrecognized arguments: --tui". The Dockerfile
-                # pre-builds ui-tui/dist/ so PTY spawn is instant.
-                "--tui",
+                *tui_arg,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
