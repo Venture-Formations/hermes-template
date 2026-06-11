@@ -1,0 +1,74 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+#
+# source_sha below is "PENDING" — the Integrate phase fills the real digest. The
+# generator does NOT auto-fill it; it only VALIDATES (fails --check on mismatch).
+# To fill after the .sh is finalized in hermes-template/patches/:
+#   1. compute the sha256 of the .sh BODY (raw bytes):
+#        shasum -a 256 hermes-template/patches/gbrain-propose-takes-disable.sh
+#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
+#   2. paste the 64-hex digest into source_sha below (replace "PENDING").
+#   3. regenerate the registry from the hermes-template checkout:
+#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
+#        bun run tools/gen-modifications.ts --check   # must print "registry in sync"
+# The pre-commit gate runs --check and blocks the commit until the sha matches.
+# If you ever edit the .sh, the sha changes -> re-run steps 1-3.
+id: gbrain-propose-takes-disable
+title: "Add a default-OFF cycle.propose_takes.enabled gate to the dream/autopilot propose_takes phase (FIX-PT-2)"
+category: gbrain-core
+risk: amber
+repo: hermes-template
+source: patches/gbrain-propose-takes-disable.sh
+source_sha: "7f1c72bb82c27f859cb86ca17ee32275d49382eeb282e20dbbbb4087c904b3fa"
+# anchor: the exact gbrain source line the patch wraps; checked present (exactly
+# once) in the PATCH BODY PREFLIGHT. A DECOY line `if (phases.includes('propose_takes') ||`
+# (ends with `||`) must NOT collide. If gbrain moves/renames the propose_takes
+# phase site the patch FAILS THE BUILD (old container keeps serving), forcing a
+# re-point — never a silent no-op.
+anchor: "        if (phases.includes('propose_takes')) {"
+# anchor_file_line: location of the anchor in the pinned gbrain tree.
+anchor_file_line: "src/core/cycle.ts (gbrain@0.42.40.0 = master HEAD)"
+# invariant: runtime assertion verify-upgrade.sh checks after build.
+invariant: >
+  src/core/cycle.ts contains the VF-FIX-PT-2 sentinel and the
+  getConfig('cycle.propose_takes.enabled') read; the propose_takes RUN block
+  (checkAborted -> progress.start('cycle.propose_takes') -> dynamic import of
+  ./cycle/propose-takes.ts runPhaseProposeTakes -> timePhase -> phaseResults.push
+  -> progress.finish -> safeYield) is wrapped in an `else` so it executes ONLY
+  when the operator has set cycle.propose_takes.enabled to a truthy value; with
+  the key ABSENT (the default), the phase pushes a 'skipped' phaseResult and
+  yields without invoking runPhaseProposeTakes (no LLM spend).
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-propose-takes-disable.probe.sh
+target_files:
+  - "src/core/cycle.ts"   # DOC ONLY — upstream gbrain file, not in any checked-out repo
+why: >
+  gbrain's dream/autopilot cycle runs the `propose_takes` phase every tick, and
+  unlike other optional phases (cycle.skillopt.enabled,
+  cycle.conversation_facts_backfill.enabled) it has NO enable gate — it always
+  runs. The phase is upstream-broken: there is no consumer / review CLI for the
+  proposed takes (garrytan/gbrain#1467), and it lacks a negative-result cache so
+  it re-LLMs every zero-take page each tick (garrytan/gbrain#2106), burning
+  ~$100/wk for output nothing surfaces. This patch adds the MISSING
+  `cycle.propose_takes.enabled` gate at the phase site, DEFAULT-OFF: an ABSENT
+  key (or any of false/0/no/off/'') skips the phase; the original RUN block runs
+  verbatim only when the operator opts in. The gate reads from engine config (DB-
+  backed), so default-OFF survives both a container rebuild AND a DB reset, and
+  is reversible at any time with
+  `gbrain config set cycle.propose_takes.enabled true` — no rebuild. This
+  INVERTS the upstream default (always-on -> off-unless-enabled) BY DESIGN: the
+  operator decision is that an unconsumable, uncached, always-on LLM phase must
+  be opt-in, not opt-out.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: >
+  garrytan/gbrain adds its own cycle.propose_takes.enabled gate (or otherwise
+  makes the propose_takes phase opt-in / config-gated) upstream, OR ships the
+  missing consumer/review CLI (#1467) + negative-result cache (#2106) so the
+  phase is no longer an unconsumable always-on LLM cost. At that point retire
+  this patch but KEEP the operator config (cycle.propose_takes.enabled stays a
+  valid knob). The still_needed_probe detects an upstream gate automatically
+  every upgrade.
+added: "2026-06-11"
+last_validated_ref: "gbrain@0.42.40.0"
+upstream: garrytan/gbrain

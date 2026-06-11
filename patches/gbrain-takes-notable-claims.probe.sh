@@ -23,7 +23,7 @@ T="$GBRAIN_SRC/core/extract-takes-from-pages.ts"
 
 # Primary anchor: the DB-only flush site Part C replaces. If gone, the extractor
 # was refactored — escalate (the patch self-audit would fail the build).
-HAS_FLUSH=$(grep -cF "claimsExtracted += await engine.addTakesBatch(batch);" "$T" 2>/dev/null || echo 0)
+HAS_FLUSH=$(grep -F "claimsExtracted += await engine.addTakesBatch(batch);" "$T" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$HAS_FLUSH" -eq 0 ]; then
   echo "[tk2-probe] UNKNOWN: addTakesBatch flush anchor gone — extract-takes-from-pages refactored; manual review."
   exit 2

@@ -208,6 +208,20 @@ RUN bash /app/patches/gbrain-loud-llm-failures.sh && \
 RUN bash /app/patches/gbrain-subagent-no-native-anthropic.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-propose-takes-disable (FIX-PT-2) ----------
+# Add the missing `cycle.propose_takes.enabled` gate (DEFAULT-OFF) to gbrain's
+# dream/autopilot cycle. The propose_takes phase runs every tick but is upstream-
+# broken: no consumer/review CLI (GH #1467) + no negative-result cache so it re-
+# LLMs every zero-take page (~$100/wk, GH #2106), and — unlike skillopt /
+# conversation_facts_backfill — it has NO enable gate. This patch wraps the phase
+# in a default-OFF gate (absent key => phase skipped), so it stays off across
+# rebuilds AND a DB reset, reversible with
+# `gbrain config set cycle.propose_takes.enabled true`. This INVERTS the upstream
+# default (on) by design. Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old
+# container keeps serving) if its anchor moved. See gbrain-propose-takes-disable.meta.yml.
+RUN bash /app/patches/gbrain-propose-takes-disable.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-
