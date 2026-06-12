@@ -34,5 +34,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain stops swallowing gateway failures silently across all four sites — i.e. it logs (or re-raises) auth/provider errors instead of a bare `return []` / silent cosine_fallback degrade / per-page `continue`, OR removes the isAvailable('chat') short-circuits in favor of a surfaced error. The still_needed_probe checks the swallow gates every upgrade."
 added: "2026-06-09"
-last_validated_ref: "gbrain@1eb430a"
+last_validated_ref: "gbrain@4ee530f"
 upstream: garrytan/gbrain

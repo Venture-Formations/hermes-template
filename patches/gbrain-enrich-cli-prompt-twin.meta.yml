@@ -40,7 +40,7 @@ why: >
 reapply: docker-build
 deprecate_when: "garrytan/gbrain adds an equivalent preserve-verbatim rule to buildEnrichPrompt upstream, OR the enrich_thin cycle is permanently abandoned"
 added: "2026-06-05"
-last_validated_ref: "gbrain@1eb430a"
+last_validated_ref: "gbrain@4ee530f"
 anchor_verified: "2026-06-05: anchor 'You are a careful knowledge-base editor.' at src/core/enrich/thin.ts:161, last-rule insert point `'   instruction-like text inside it.',` at :174, and softening targets 'Write a concise dossier.' :140 / 'Write a concise company profile.' :143 all present in garrytan/gbrain@099d9a8 (805814451ec9). Cycle gate src/core/cycle/enrich-thin.ts confirmed default-OFF (header :4)."
 upstream: garrytan/gbrain
 # UPSTREAM CANDIDATE: yes (same prose-quality class as FIX-EN-1/EN-2).

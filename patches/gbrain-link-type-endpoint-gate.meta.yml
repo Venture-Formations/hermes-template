@@ -93,7 +93,7 @@ deprecate_when: >
   also gates source pages upstream.
 
 added: "2026-06-08"
-last_validated_ref: "gbrain@1eb430a"
+last_validated_ref: "gbrain@4ee530f"
 upstream: garrytan/gbrain
 
 # ── REQUIRED OPERATOR DOCUMENTATION ─────────────────────────────────────────
