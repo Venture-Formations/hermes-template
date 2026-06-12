@@ -19,7 +19,12 @@
 
 src/core/ai/recipes/anthropic.ts   # recipe DATA only: declares implementation:'native-anthropic'. Never builds a client outside resolveRecipe, which FIX-NA-1 reroutes upstream of construction.
 
-# --- reviewed 2026-06-09 against gbrain@1eb430a (first prod build surfaced these) ---
+# --- reviewed 2026-06-09 against gbrain@1eb430a (first prod build surfaced these);
+#     re-confirmed 2026-06-12 against gbrain@4ee530f (deployed pin; container tree
+#     0.42.42.0): every entry below re-verified on-container — roles unchanged,
+#     anthropic.ts builds no client (0 construction hits), gateway.ts createAnthropic
+#     still the single downstream-of-resolveRecipe site, the FIX-NA-2 throw guard is
+#     present in subagent.ts, and no new construction sites appeared. ---
 # The CANONICAL native-anthropic client is built in the gateway, reached only via
 # resolveRecipe() — which FIX-NA-1 reroutes BEFORE construction when no ANTHROPIC_API_KEY.
 src/core/ai/gateway.ts        # canonical AI gateway: the one native-anthropic client (createAnthropic(...).languageModel) + the `case 'native-anthropic':` dispatch + the @ai-sdk/anthropic import. Construction is downstream of resolveRecipe, which FIX-NA-1 gates.

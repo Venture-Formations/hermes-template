@@ -1,18 +1,7 @@
 # Source-of-truth metadata for a gbrain-core modification.
 # Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
-#
-# source_sha below is a PLACEHOLDER. The generator does NOT auto-fill it — it
-# only VALIDATES (fails --check on mismatch). To fill after moving the .sh into
-# hermes-template/patches/:
-#   1. compute the sha256 of the .sh BODY (raw bytes):
-#        shasum -a 256 hermes-template/patches/gbrain-link-type-endpoint-gate.sh
-#      (== Bun.CryptoHasher("sha256") over the file bytes; gen-modifications.ts:36)
-#   2. paste the 64-hex digest into source_sha below (replace PLACEHOLDER_…).
-#   3. regenerate the registry from the hermes-template checkout:
-#        bun run tools/gen-modifications.ts          # writes MODIFICATIONS.md + lock
-#        bun run tools/gen-modifications.ts --check  # must print "registry in sync"
-# The pre-commit gate runs --check and blocks the commit until the sha matches.
-# If you ever edit the .sh, the sha changes → re-run steps 1–3.
+# source_sha below is the real sha256 of the .sh body. If you edit the .sh, re-run
+# `bun tools/gen-modifications.ts` (the pre-commit --check gate fails on mismatch).
 
 id: gbrain-link-type-endpoint-gate
 title: "Endpoint/directionality gate on inferLinkType — suppress impossible verb assignments (FIX-TE-1)"

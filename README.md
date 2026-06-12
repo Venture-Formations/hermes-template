@@ -6,9 +6,6 @@ Deploy [Hermes Agent](https://github.com/NousResearch/hermes-agent) on [Railway]
 
 > Hermes Agent is an autonomous AI agent by [Nous Research](https://nousresearch.com/) that lives on your server, connects to your messaging channels (Telegram, Discord, Slack, etc.), and gets more capable the longer it runs.
 
-<!-- TODO: Add dashboard screenshot -->
-<!-- ![Dashboard](docs/dashboard.png) -->
-
 ## Features
 
 - **Admin Dashboard** — dark-themed UI to configure providers, channels, tools, and manage the gateway
@@ -55,9 +52,6 @@ Hermes Agent interacts entirely through messaging channels — there is no chat 
 ### 5. Start Chatting
 
 Message your Telegram bot. If you're a new user, a pairing request will appear in the admin dashboard under **Users** — click **Approve**, and you're in.
-
-<!-- TODO: Add Telegram chat screenshot -->
-<!-- ![Telegram Example](docs/telegram-example.png) -->
 
 ## Environment Variables
 
