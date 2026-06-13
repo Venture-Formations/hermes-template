@@ -237,6 +237,32 @@ RUN bash /app/patches/gbrain-propose-takes-disable.sh && \
 RUN bash /app/patches/gbrain-takes-grade-sort-asc.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patches: schema-pack evolving-schema fixes --------------
+# Three independent upstream bugs (#1749 / #1750 / #1574+#1726) that together make
+# a custom pack `extends: gbrain-base-v2` collapse to its own types / fail to load.
+# ORDER: merge → yaml → ssot (the ssot reroute of `schema show/use <name>` through
+# the resolver returns inherited taxonomy only once the merge patch is present;
+# they apply independently — no shared anchor). Each is idempotent + self-auditing:
+# EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving) on anchor/
+# checksum drift. See patches/gbrain-schema-pack-*.meta.yml.
+#
+# #1749 — resolvePack built ResolvedPack from the BARE CHILD (never merged the
+# extends chain / borrow_from). FULL-FILE REPLACEMENT of registry.ts, guarded by a
+# pre-clobber content-checksum gate pinned to GBRAIN_REF=4ee530f.
+RUN bash /app/patches/gbrain-schema-pack-resolve-merge.sh && \
+    gbrain --version
+# #1750 — parseYamlMini silently drops every key after a block scalar
+# (`description: |`). FULL-FILE REPLACEMENT of loader.ts (checksum-guarded) →
+# parseYamlMini delegates to js-yaml safeLoad (already a dep).
+RUN bash /app/patches/gbrain-schema-pack-yaml-blockscalar.sh && \
+    gbrain --version
+# #1574/#1726 — bundled-pack registries disagree → `schema use/show <bundled>` =
+# "Unknown pack", `schema list` shows 2. New bundled.ts SSOT + FULL-FILE
+# REPLACEMENT of commands/schema.ts (checksum-guarded): runList → SSOT; routes
+# named show/use through loadActivePack({perCall}).
+RUN bash /app/patches/gbrain-schema-pack-bundled-ssot.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

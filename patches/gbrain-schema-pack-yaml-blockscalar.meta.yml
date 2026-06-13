@@ -1,0 +1,57 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+id: gbrain-schema-pack-yaml-blockscalar
+title: "Parse pack YAML with js-yaml so block scalars don't silently drop keys (FIX-SP-YAML, upstream #1750)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-schema-pack-yaml-blockscalar.sh
+source_sha: "984073dca418087f2f079e643a102e3fdaa747a78d4105485d59c9df891ced54"
+# anchor: the pinned VANILLA 4ee530f sha256 of loader.ts — the pre-clobber identity
+# gate. --check verifies this string is in the .sh body; build-time mismatch FAILS
+# THE BUILD (re-key the drop-in).
+anchor: "57fd73eef9894d699227d63eff628f44f722ee52583898c3532d5ea2aecd55ba"
+invariant: >
+  src/core/schema-pack/loader.ts carries the VF-FIX-SP-YAML sentinel; parseYamlMini
+  delegates to js-yaml safeLoad (JSON_SCHEMA) behind an anchors/aliases/merge-keys/
+  tags reject-guard, keeping the exported signature (mutate.ts + the barrel import
+  it) and the js-yaml import. PROOF (run locally @4ee530f): a custom pack whose first
+  key is a multi-line `description: |` before `page_types:` resolves with its
+  page_types intact (not 0); gbrain-recommended (which opens with `description: |`)
+  goes 0 -> 30 page_types and renders the description as prose, not the literal "|".
+still_needed_probe: patches/gbrain-schema-pack-yaml-blockscalar.probe.sh
+target_files:
+  - "gbrain src/core/schema-pack/loader.ts (FULL-FILE REPLACEMENT keyed to 4ee530f content sha256 57fd73ee...; parseYamlMini -> js-yaml shim + import)"
+why: >
+  Upstream #1750 (open, confirmed broken @ 4ee530f): loader.ts hand-rolled
+  parseYamlMini has zero block-scalar support. For `description: |` its parseMapping
+  sets rest="|" then the next indented body line trips `if (indent > baseIndent)
+  break;`, TERMINATING the mapping parse and SILENTLY dropping page_types: and every
+  later key → a custom pack with a multi-line description resolves to 0 page_types.
+  The fix replaces parseYamlMini's body with a js-yaml safeLoad delegate (js-yaml
+  @^3.14.2 is ALREADY a prod dep, imported by core/markdown.ts — no new dependency)
+  parsed under JSON_SCHEMA (no implicit timestamp coercion; semver strings preserved,
+  Zod enforces shape downstream), behind a pre-scan that rejects anchors/aliases/
+  merge-keys/tags fail-loud to preserve the parser's intentionally-narrow contract
+  (the rejector blanks quoted spans + comments first, so base-v2's quoted "*unknown*"
+  / "*original_type*" are NOT false positives). The export name + signature are
+  unchanged (mutate.ts writePackManifest round-trip + the test suite import
+  parseYamlMini). MECHANISM: delivered as a FULL-FILE REPLACEMENT guarded by a
+  pre-clobber content-checksum gate (loader.ts sha256 must equal the pinned 4ee530f
+  hash 57fd73ee...; mismatch FAILS THE BUILD) — consistent with the registry drop-in;
+  the corrected file is small (~140 lines) and a checksum-keyed swap is more durable
+  than a multi-region perl splice (the change adds two imports + two helpers + a const
+  across non-contiguous regions). NOT filed upstream (operator decision — VF-only fork
+  patch). Proven locally end-to-end + 363 schema-pack tests pass on the baked tree.
+reapply: docker-build
+deprecate_when: >
+  garrytan/gbrain ships block-scalar support in parseYamlMini (or replaces it with a
+  real YAML parser) and GBRAIN_REF advances past it. On ANY GBRAIN_REF bump the
+  pre-clobber checksum gate fails the build first (loader.ts changed) — re-read the
+  upstream file, re-key the drop-in (UPGRADING_GBRAIN.md -> "Re-keying a full-file-
+  replacement patch"), or retire if upstream fixed it. The still_needed_probe checks
+  whether the "NOT supported in v1" block-scalar admission is gone or a js-yaml/full
+  parser is present.
+added: "2026-06-13"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain
