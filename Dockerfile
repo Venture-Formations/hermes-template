@@ -223,6 +223,20 @@ RUN bash /app/patches/gbrain-subagent-no-native-anthropic.sh && \
 RUN bash /app/patches/gbrain-propose-takes-disable.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-takes-grade-sort-asc (FIX-TK-3) -----------
+# Flip the grade_takes since_date sort DESC→ASC (oldest-first) in BOTH engines.
+# grade_takes loads listTakes({sortBy:'since_date', limit:50}) and its own comment
+# says "oldest-first", but the engines order since_date DESC (newest-first), so the
+# 50-take window only ever holds the newest (too-recent) takes → 0 verdicts every
+# cycle, starving take_grade_cache / calibration_profiles / dream_verdicts / eval.
+# grade-takes.ts is the SOLE sortBy:'since_date' caller, so the flip is safe and
+# realises the documented intent (pairs with the gbrain-backfill-take-dates cron
+# that supplies the dates). Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old
+# container keeps serving) if the since_date ORDER BY moved. See
+# gbrain-takes-grade-sort-asc.meta.yml.
+RUN bash /app/patches/gbrain-takes-grade-sort-asc.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

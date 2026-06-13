@@ -1,0 +1,51 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-takes-grade-sort-asc
+title: "Flip the grade_takes since_date sort DESC→ASC (oldest-first) so grading reaches age-eligible takes (FIX-TK-3)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-takes-grade-sort-asc.sh
+source_sha: "980fd746c82a8fe5fb7dc6741e34e9fa945f9dbffa089d64ef9339d77f1cb86f"
+# anchor: the exact since_date ORDER BY clause the patch flips; checked present
+# EXACTLY ONCE per engine in the PATCH BODY by --check. If gbrain changes the
+# since_date sort the patch FAILS THE BUILD (old container keeps serving), forcing
+# a re-point — never a silent no-op.
+anchor: "THEN t.since_date END DESC NULLS LAST"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/core/postgres-engine.ts AND src/core/pglite-engine.ts order the since_date sort `THEN t.since_date END ASC NULLS LAST` (oldest-first), not DESC; grade-takes.ts is the sole sortBy:'since_date' caller, so its 50-take window loads the OLDEST dated takes first and reaches the age-eligible ones (non-zero verdicts possible) instead of only the newest-too-recent 50."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-takes-grade-sort-asc.probe.sh
+target_files:
+  - "gbrain src/core/postgres-engine.ts (since_date ORDER BY ~L4317; DESC→ASC)"   # DOC ONLY — upstream gbrain file
+  - "gbrain src/core/pglite-engine.ts (since_date ORDER BY ~L4228; DESC→ASC, parity)"
+why: >
+  grade_takes (src/core/cycle/grade-takes.ts) loads unresolved takes with
+  engine.listTakes({ sortBy:'since_date', limit }) and its own comment says
+  "oldest-first" — but both engines order the since_date sort DESC NULLS LAST
+  (newest-first). With the default 50-take window, grade_takes therefore only ever
+  sees the 50 NEWEST-dated takes, which on a steady-state brain are all younger
+  than the min-age gate (default 6 months), so takeIsOldEnough rejects all 50 and
+  grade_takes writes ZERO verdicts every cycle regardless of how many genuinely-old
+  gradeable takes exist below the window. This starves take_grade_cache,
+  calibration_profiles, dream_verdicts, and the eval surface (all 0 rows). Confirmed
+  on this brain (2026-06-13): after backfilling 332 source-page takes with their real
+  frontmatter content-dates (180 predictive, 55 ≥6 months old), a grade_takes dry-run
+  still reported "scanned 50, 50 too recent, 0 verdicts" — the 55 old gradeable takes
+  sit below the newest-50 DESC window and are never loaded. grade-takes.ts:420 is the
+  ONLY caller of sortBy:'since_date' in the whole tree, so flipping that single
+  ORDER BY to ASC is safe and exactly realises the documented "oldest-first". NULLS
+  LAST is preserved (date-less takes sort last; grade_takes filters them anyway).
+  Pairs with the gbrain-backfill-take-dates cron (hermes-workspace _ops; populates
+  since_date from source-page frontmatter) — the backfill supplies the dates, this
+  patch lets grade_takes reach them. NOTE: early verdicts may still be 'unresolvable'
+  (the evidence retriever is an upstream v0.36.1.0 stub), but the cache/calibration
+  surfaces start populating instead of being structurally dead.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain orders the grade_takes since_date sort ASC/oldest-first upstream (or loads grade_takes oldest-first by another means / drops the bounded newest-first window). The still_needed_probe checks the since_date ORDER BY direction every upgrade. NOT filed upstream (operator decision 2026-06-13) — VF-only fork patch."
+added: "2026-06-13"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain
