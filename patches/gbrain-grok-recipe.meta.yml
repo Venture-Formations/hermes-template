@@ -8,14 +8,14 @@ category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-grok-recipe.sh
-source_sha: "8ac6c4b66d721c41d03a15653de522e567b343e4c9d52951cda91033ff13216d"
+source_sha: "c786a31241bab68fe79250cd272a9317ad7a8434fbde80073b0b06f44ca26302"
 # anchor: the exact string the patch depends on; checked present in the PATCH
 # BODY by --check. This is the FIX-NA-1 reroute literal the grok patch repoints —
 # if gbrain-no-anthropic-reroute.sh changes its emitted target, this anchor
 # signals the dependency and the patch fails the build, forcing a re-point.
 anchor: "return resolveRecipe('openrouter:auto');"
 # invariant: runtime assertion verify-upgrade.sh checks on-container.
-invariant: "src/core/ai/recipes/grok.ts exists (keyless openai-compat recipe, base_url http://127.0.0.1:8645/v1), is registered in recipes/index.ts (VF-FIX-GROK-1 import + ALL[] entry), and the VF-FIX-NA-1 reroute in model-resolver.ts targets grok:grok-4.3 (no openrouter:auto literal remains)."
+invariant: "src/core/ai/recipes/grok.ts exists (keyless openai-compat recipe, base_url http://127.0.0.1:8645/v1), is registered in recipes/index.ts (VF-FIX-GROK-1 import + ALL[] entry), and the VF-FIX-NA-1 reroute in model-resolver.ts targets the LIVE DEFAULT via a guarded getChatModel() (import present; try/catch + !startsWith('anthropic:') fallback to grok:grok-4.3; no openrouter:auto literal remains) — so a dashboard model switch propagates to the hardcoded-anthropic utility tier too."
 # still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
 # candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
 still_needed_probe: patches/gbrain-grok-recipe.probe.sh

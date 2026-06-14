@@ -84,7 +84,12 @@ done
 ANCHOR_INDEX_IMPORT="import { deepseek } from './deepseek.ts';"
 ANCHOR_INDEX_ARRAY="  deepseek,"
 ANCHOR_REROUTE_FROM="return resolveRecipe('openrouter:auto');"
-ANCHOR_REROUTE_TO="return resolveRecipe('grok:grok-4.3');"
+# (c) no longer repoints to a grok LITERAL — it repoints to the LIVE default via
+# getChatModel() (so a dashboard model switch propagates to the hardcoded-anthropic
+# utility tier too), with a guaranteed-reachable grok:grok-4.3 fallback. These two
+# anchors gate that edit:
+ANCHOR_RESOLVER_IMPORT="import { AIConfigError } from './errors.ts';"          # import insertion point
+REROUTE_SENTINEL="_d = getChatModel()"                                          # presence == guarded form landed (idempotency + audit)
 
 # ---------------------------------------------------------------------------
 # (a) Write the keyless openai-compat grok recipe. Always (re)write so an
@@ -190,12 +195,25 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# (c) Re-point the FIX-NA-1 reroute target openrouter:auto -> grok:grok-4.3.
-#     The NA patch ran earlier and injected the VF-FIX-NA-1 block; we rewrite
-#     ONLY its emitted reroute literal. Idempotent: if already grok, no-op.
+# (c) Re-point the FIX-NA-1 reroute target from openrouter:auto to the LIVE
+#     DEFAULT (getChatModel()), with a guaranteed-reachable grok:grok-4.3 fallback.
+#     WHY the live default and not a grok literal: gbrain has dozens of hardcoded
+#     `anthropic:claude-*` UTILITY defaults; FIX-NA-1 catches them here. Pinning a
+#     grok literal would leave that whole tier on grok even after the operator
+#     switches the dashboard model — exactly the "task does not follow the
+#     dashboard" leak class. Reading getChatModel() (== the synced live default)
+#     makes the utility tier follow a switch too.
+#     SAFETY (verified): (1) the ESM cycle is fine — model-resolver imports
+#     getChatModel from gateway.ts and gateway.ts imports resolveRecipe from here,
+#     but the call is runtime-only so bun resolves it (gbrain --version loads).
+#     (2) getChatModel()->requireConfig() THROWS if the gateway isn't configured
+#     yet (pre-config resolve sites: doctor, schema setup) — so it is wrapped in
+#     try/catch and falls back to the grok literal. (3) the !startsWith('anthropic:')
+#     guard breaks recursion (an anthropic-shaped default never re-enters this
+#     branch). Idempotent: no-op once the guarded form (getChatModel) is present.
 # ---------------------------------------------------------------------------
-if grep -qF "$ANCHOR_REROUTE_TO" "$RESOLVER"; then
-  echo "[grok-recipe] ✓ (c) reroute already points at grok:grok-4.3 — no-op."
+if grep -qF "$REROUTE_SENTINEL" "$RESOLVER"; then
+  echo "[grok-recipe] ✓ (c) reroute already tracks the live default (getChatModel) — no-op."
 else
   if ! grep -qF "VF-FIX-NA-1" "$RESOLVER"; then
     echo "[grok-recipe] ERROR: VF-FIX-NA-1 block absent from $RESOLVER." >&2
@@ -209,9 +227,42 @@ else
     echo "[grok-recipe]     gbrain-no-anthropic-reroute.sh changed its emitted target. RE-POINT THIS PATCH. FAILING THE BUILD." >&2
     exit 1
   fi
-  # Replace only inside the resolver (the literal is unique to the VF block).
-  sed -i "s@${ANCHOR_REROUTE_FROM}@${ANCHOR_REROUTE_TO}@" "$RESOLVER"
-  echo "[grok-recipe] ✓ (c) repointed FIX-NA-1 reroute -> grok:grok-4.3"
+  # (c.1) add the getChatModel import (idempotent), after the errors.ts import.
+  if ! grep -qF "import { getChatModel } from './gateway.ts'" "$RESOLVER"; then
+    if ! grep -qF "$ANCHOR_RESOLVER_IMPORT" "$RESOLVER"; then
+      echo "[grok-recipe] ERROR: resolver import anchor not found: $ANCHOR_RESOLVER_IMPORT" >&2
+      echo "[grok-recipe]     gbrain restructured model-resolver.ts imports. RE-POINT THIS PATCH. FAILING THE BUILD." >&2
+      exit 1
+    fi
+    IMP=$(mktemp)
+    printf "%s\n" "import { getChatModel } from './gateway.ts'; // [VF-FIX-GROK-1] live-default reroute target (runtime-only call; ESM cycle safe)" > "$IMP"
+    sed -i "\@${ANCHOR_RESOLVER_IMPORT}@r ${IMP}" "$RESOLVER"
+    rm -f "$IMP"
+    echo "[grok-recipe] ✓ (c.1) added getChatModel import to model-resolver.ts"
+  fi
+  # (c.2) replace the single reroute line with the guarded live-default block.
+  #       awk fixed-string match (handles the TS punctuation) replacing the FIRST
+  #       line that contains the FROM anchor with the contents of $BLK.
+  BLK=$(mktemp)
+  cat > "$BLK" <<'TS'
+    // [VF-FIX-GROK-1] Reroute target TRACKS THE LIVE DEFAULT so a dashboard model
+    // switch propagates to the hardcoded-anthropic utility tier too. try/catch:
+    // getChatModel()->requireConfig() throws pre-gateway-config (doctor/schema) —
+    // fall back to the guaranteed-reachable grok recipe. The !startsWith('anthropic:')
+    // guard breaks reroute recursion.
+    let _d = '';
+    try { _d = getChatModel(); } catch { /* gateway not configured yet */ }
+    return resolveRecipe(_d && !_d.startsWith('anthropic:') ? _d : 'grok:grok-4.3');
+TS
+  awk -v anchor="$ANCHOR_REROUTE_FROM" -v insfile="$BLK" '
+    BEGIN { repl=""; while ((getline line < insfile) > 0) repl = repl line ORS }
+    index($0, anchor) && !done { printf "%s", repl; done=1; next }
+    { print }
+    END { if (!done) exit 3 }
+  ' "$RESOLVER" > "$RESOLVER.vftmp" || { echo "[grok-recipe] ERROR: (c.2) awk replace failed to find the reroute line. FAILING THE BUILD." >&2; rm -f "$BLK" "$RESOLVER.vftmp"; exit 1; }
+  mv "$RESOLVER.vftmp" "$RESOLVER"
+  rm -f "$BLK"
+  echo "[grok-recipe] ✓ (c.2) repointed FIX-NA-1 reroute -> live default (getChatModel) with grok:grok-4.3 fallback"
 fi
 
 # ---------------------------------------------------------------------------
@@ -226,8 +277,17 @@ if ! grep -qF "from './grok.ts'" "$INDEX" || ! grep -qE '^\s*grok,\s*//\s*\[VF-F
   echo "[grok-recipe] ERROR: post-apply audit — grok not fully registered in index.ts. FAILING THE BUILD." >&2
   exit 1
 fi
-if ! grep -qF "$ANCHOR_REROUTE_TO" "$RESOLVER"; then
-  echo "[grok-recipe] ERROR: post-apply audit — reroute target is not grok:grok-4.3. FAILING THE BUILD." >&2
+if ! grep -qF "$REROUTE_SENTINEL" "$RESOLVER"; then
+  echo "[grok-recipe] ERROR: post-apply audit — reroute does not track the live default (getChatModel guarded form absent). FAILING THE BUILD." >&2
+  exit 1
+fi
+if ! grep -qF "import { getChatModel } from './gateway.ts'" "$RESOLVER"; then
+  echo "[grok-recipe] ERROR: post-apply audit — getChatModel import missing from model-resolver.ts (guarded reroute would not compile). FAILING THE BUILD." >&2
+  exit 1
+fi
+# The guaranteed-reachable fallback literal must remain present.
+if ! grep -qF "'grok:grok-4.3'" "$RESOLVER"; then
+  echo "[grok-recipe] ERROR: post-apply audit — grok:grok-4.3 fallback literal absent from the reroute. FAILING THE BUILD." >&2
   exit 1
 fi
 # Defensive: the openrouter:auto literal must be GONE from the resolver (else
@@ -236,5 +296,5 @@ if grep -qF "resolveRecipe('openrouter:auto')" "$RESOLVER"; then
   echo "[grok-recipe] ERROR: post-apply audit — openrouter:auto reroute literal still present after repoint. FAILING THE BUILD." >&2
   exit 1
 fi
-echo "[grok-recipe] ✓ applied: keyless grok recipe registered; FIX-NA-1 reroute -> grok:grok-4.3 (xAI subscription via Hermes proxy)."
+echo "[grok-recipe] ✓ applied: keyless grok recipe registered; FIX-NA-1 reroute -> live default (getChatModel) with grok:grok-4.3 fallback (xAI subscription via Hermes proxy)."
 echo "[grok-recipe] done."

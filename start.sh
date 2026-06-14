@@ -117,10 +117,14 @@ RLSEOF
         # /tmp/gbrain-backfill.log). Do NOT redeploy until the backfills finish, or
         # they restart from scratch (both are idempotent, so a restart is safe).
         #
-        # 1. Route the subagent tier to OpenRouter (no Anthropic dependency). `auto`
-        #    can land on weak/no-tool models and never caches; pin a capable one.
-        btlog "selfheal-full: set models.tier.subagent to openrouter:auto (dynamic)"
-        gbrain config set models.tier.subagent openrouter:auto 2>&1 | sed 's/^/[gbrain-boot-task] /'
+        # 1. (subagent tier) — DELIBERATELY NOT SET HERE. The subagent tier is owned
+        #    by sync-main-model-to-gbrain.sh (workspace-pull cron, every 15m), which
+        #    binds models.tier.subagent to the LIVE Hermes dashboard model. The old
+        #    `gbrain config set models.tier.subagent openrouter:auto` line was a stale
+        #    pre-grok literal that (a) bypassed FIX-NA-1 (openrouter:auto is not an
+        #    anthropic: id) and would bill OpenRouter, and (b) was a one-shot stomp the
+        #    next sync reverted anyway. Pre-first-sync, the FIX-NA-1 reroute + grok
+        #    recipe already give a reachable default, so no boot-time override is needed.
         # 2. Re-create the schema the ledger reports as done but whose objects are
         #    missing ("falsely up-to-date": config.version >= 80 so the version-gated
         #    runner applies nothing, yet takes.resolved_quality / drift_decisions are
