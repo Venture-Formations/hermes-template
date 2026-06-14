@@ -1,0 +1,59 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-grok-budget-unmetered
+title: "Treat the flat-rate grok/SuperGrok chat provider as $0 in BudgetTracker so --max-cost-capped phases (brainstorm) don't TX2 no_pricing-hard-fail (FIX-GROK-BUDGET-1)"
+category: gbrain-core
+risk: amber
+repo: hermes-template
+source: patches/gbrain-grok-budget-unmetered.sh
+source_sha: "1de3b898240be5df9153a4b6eeb0541bb9aeecd9b83e4c9fe1fe40163e841b11"
+# anchor: the exact upstream literal the patch splices next to; --check asserts it
+# is present in the PATCH BODY (the .sh). If gbrain restructures lookupPricing()'s
+# rerank free-provider clause, this signals the dependency and the patch fails the
+# build, forcing a re-point.
+anchor: "if (kind === 'rerank' && providerId && FREE_LOCAL_RERANK_PROVIDERS.has(providerId)) {"
+# invariant: runtime assertion verify-upgrade.sh checks on-container.
+invariant: "src/core/budget/budget-tracker.ts lookupPricing() returns {input:0,output:0} for kind chat|rerank when the provider half is 'grok' (FREE_SUBSCRIPTION_CHAT_PROVIDERS), so BudgetTracker.reserve() does not throw no_pricing for grok:grok-4.3 under a maxCostUsd cap. A paid provider (e.g. anthropic:claude-*) still prices non-zero; a genuinely-unknown provider still throws no_pricing."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-grok-budget-unmetered.probe.sh
+target_files:
+  - "src/core/budget/budget-tracker.ts"   # DOC ONLY — upstream gbrain file, not in any checked-out repo
+why: >
+  We route gbrain's LLM calls through the operator's grok / SuperGrok flat-rate
+  OAuth subscription via the Hermes xAI-OAuth proxy (FIX-GROK-1). That
+  subscription has zero marginal per-token cost, so grok:grok-4.3 is intentionally
+  absent from gbrain's pricing maps. But gbrain's BudgetTracker (the cost-ceiling
+  accounting primitive) HARD-FAILS ("TX2 no_pricing") whenever a --max-cost cap is
+  set AND the model id is unpriced. gbrain brainstorm is the live victim: its
+  orchestrator forces maxCostUsd ?? 5 and the CLI rejects --max-cost 0, so there
+  is NO bypass — every brainstorm run no_pricing-failed on grok. (Production
+  dream/cycle/autopilot are unaffected today only because their budget-capped
+  phases are disabled and default phases run uncapped/warn-once; any later-enabled
+  capped phase routed to grok would fail identically.)
+  Adding a real dollar price was rejected after a multi-discipline review: (1)
+  ANTHROPIC_PRICING (the map the chat lookup reads) is a DERIVED, anthropic-only
+  view whose header forbids hand-editing, so a grok/CANONICAL key is filtered out
+  and never reaches the chat path — it is mechanically unreachable without also
+  re-routing budget-tracker through canonicalLookup (a behavior change for ALL
+  non-anthropic models); and (2) a real price makes the $5 cap a hard wall that
+  would falsely abort long-but-free runs on a flat-rate sub, while buying no
+  runaway protection we lose here (the brainstorm orchestrator's own
+  canonicalLookup + Sonnet-{3,15} proxy volume guards are a SEPARATE path,
+  untouched). So this patch instead adds 'grok' to a FREE_SUBSCRIPTION_CHAT_PROVIDERS
+  allowlist that returns {0,0} for kind chat|rerank — the honest representation of
+  a flat-rate subscription, sibling to gbrain's own FREE_LOCAL_EMBED_PROVIDERS /
+  FREE_LOCAL_RERANK_PROVIDERS $0 sets. Matched on the PROVIDER half ('grok', the
+  recipe id) so grok-4.3 -> grok-4.4 needs no edit. FORK-SPECIFIC: the provider id
+  'grok' is our recipe. Verified on-container: grok chat under a cap no longer
+  throws; anthropic:claude-* still prices non-zero (a huge call still THROWs cost);
+  an unknown provider still THROWs no_pricing; the llama-server-reranker rerank
+  path is unaffected; and a real `gbrain brainstorm` run completes (exit 0, ideas
+  generated, judge_failed:false).
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain prices grok/xai natively in a map the chat lookup reaches (CANONICAL_PRICING / anthropic-pricing.ts gains a grok/xai key — the probe detects it), OR gbrain adds grok/xai to one of its own FREE_*_PROVIDERS sets, OR the 'recipe-cost-driven resolution' v0.41+ TODO lands so the grok recipe's advisory cost_per_1m_*_usd:0 feeds lookupPricing, OR the operator stops routing gbrain through grok (FIX-GROK-1 retired), OR brainstorm/capped phases gain a documented uncapped path."
+added: "2026-06-14"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain

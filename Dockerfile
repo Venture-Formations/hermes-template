@@ -142,6 +142,22 @@ RUN bash /app/patches/gbrain-no-anthropic-reroute.sh && \
 RUN bash /app/patches/gbrain-grok-recipe.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: grok budget unmetered (FIX-GROK-BUDGET-1) --------
+# The grok recipe above is keyless/flat-rate (operator SuperGrok OAuth via the
+# Hermes proxy), so grok:grok-4.3 is intentionally absent from gbrain's pricing
+# maps. gbrain's BudgetTracker hard-fails ("TX2 no_pricing") on any --max-cost-
+# capped call whose model is unpriced — which makes `gbrain brainstorm`
+# (orchestrator forces maxCostUsd ?? 5; CLI rejects --max-cost 0, no bypass)
+# unusable on grok, and would break any future capped phase routed to grok. This
+# patch adds 'grok' to a FREE_SUBSCRIPTION_CHAT_PROVIDERS $0 allowlist in
+# budget-tracker.ts lookupPricing() — mirroring gbrain's own FREE_LOCAL_* sets —
+# so the cap is satisfied at $0 while paid providers stay priced and the
+# orchestrator's own token-volume guards stay live. Runs after the grok recipe
+# (logical grouping; no hard dependency — different file). Idempotent; FAILS THE
+# BUILD LOUDLY if an anchor moved. See patches/gbrain-grok-budget-unmetered.meta.yml.
+RUN bash /app/patches/gbrain-grok-budget-unmetered.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch #2: curated MCP tool allowlist -------------------
 # `gbrain serve --http` advertises all ~81 non-localOnly operations over MCP and
 # does NOT filter the tool list by OAuth scope (scope is enforced only at call
