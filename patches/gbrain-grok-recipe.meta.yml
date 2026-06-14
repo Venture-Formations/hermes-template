@@ -1,0 +1,54 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-grok-recipe
+title: "Route gbrain LLM calls to the operator grok/SuperGrok subscription via the Hermes xAI-OAuth proxy (FIX-GROK-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-grok-recipe.sh
+source_sha: "8ac6c4b66d721c41d03a15653de522e567b343e4c9d52951cda91033ff13216d"
+# anchor: the exact string the patch depends on; checked present in the PATCH
+# BODY by --check. This is the FIX-NA-1 reroute literal the grok patch repoints —
+# if gbrain-no-anthropic-reroute.sh changes its emitted target, this anchor
+# signals the dependency and the patch fails the build, forcing a re-point.
+anchor: "return resolveRecipe('openrouter:auto');"
+# invariant: runtime assertion verify-upgrade.sh checks on-container.
+invariant: "src/core/ai/recipes/grok.ts exists (keyless openai-compat recipe, base_url http://127.0.0.1:8645/v1), is registered in recipes/index.ts (VF-FIX-GROK-1 import + ALL[] entry), and the VF-FIX-NA-1 reroute in model-resolver.ts targets grok:grok-4.3 (no openrouter:auto literal remains)."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-grok-recipe.probe.sh
+target_files:
+  - "src/core/ai/recipes/grok.ts"        # DOC ONLY — VF-authored upstream gbrain file, not in any checked-out repo
+  - "src/core/ai/recipes/index.ts"       # DOC ONLY — upstream gbrain file, not in any checked-out repo
+  - "src/core/ai/model-resolver.ts"      # DOC ONLY — upstream gbrain file (FIX-NA-1 reroute target repointed here)
+why: >
+  We route the gbrain knowledge engine's LLM calls through the operator's grok /
+  SuperGrok subscription via the Hermes xAI-OAuth proxy, instead of
+  openrouter:auto. The proxy (hermes proxy start --provider xai, supervised in
+  start.sh) is a localhost-only OpenAI-compatible forwarder at
+  http://127.0.0.1:8645/v1 that strips the inbound Authorization and attaches the
+  operator's xAI OAuth from /data/.hermes/auth.json (auto-refreshing, no per-user
+  session). gbrain needs a KEYLESS openai-compat recipe pointed at it. This patch
+  (a) writes that recipe at src/core/ai/recipes/grok.ts (id grok, base_url the
+  proxy, chat model grok-4.3, auth_env.required:[] — modeled on ollama/litellm;
+  defaultResolveAuth sends "Bearer unauthenticated" which the proxy discards, and
+  isAvailable('chat') returns true so facts/takes extractors see the model as
+  available, with NO dummy env var / Dockerfile ENV needed); (b) registers it in
+  the static recipes/index.ts registry; and (c) repoints the FIX-NA-1 reroute
+  target (openrouter:auto -> grok:grok-4.3) at the single resolveRecipe
+  chokepoint, so gbrain's hardcoded native anthropic: defaults AND a bare grok-4.3
+  (both normalize to the native anthropic path with no key) route to grok. The
+  recipe and its consumer (the reroute) are ONE atomic unit in ONE patch with a
+  single gbrain --version smoke gate, so the recipe always exists before anything
+  routes to it. The existing gbrain-no-anthropic-reroute.sh (and its probe /
+  anthropic-scan, which assert only the sentinel) are left untouched. Embeddings
+  stay on zeroentropyai. Caveat: the subagent tier's enforceSubagentCapable
+  assumes an Anthropic shape and warns/falls back for grok — accepted (identical
+  to the prior openrouter:auto behavior).
+reapply: docker-build      # idempotent; re-runs after the gbrain install + after gbrain-no-anthropic-reroute.sh on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain ships a native grok/xai openai-compat recipe pointed at a local Hermes proxy (the still_needed_probe detects this), OR the operator stops routing gbrain through the grok/SuperGrok subscription (reverting FIX-NA-1 to openrouter:auto and removing this recipe), OR gbrain gains a global config knob to set every default/utility model so the FIX-NA-1 repoint is no longer the only lever."
+added: "2026-06-14"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain

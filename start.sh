@@ -247,6 +247,79 @@ V43EOF
   fi
 ) || true
 
+# --- Hermes xAI-OAuth proxy supervision (gbrain LLM upstream) ---------------
+# gbrain's LLM calls route to the operator's grok / SuperGrok subscription via
+# this proxy (see the gbrain-grok-recipe build patch: recipe `grok` -> base URL
+# http://127.0.0.1:8645/v1, and the FIX-NA-1 reroute -> grok:grok-4.3). The
+# proxy is `hermes proxy start --provider xai` — a localhost-only
+# OpenAI-compatible forwarder that strips the inbound Authorization and attaches
+# the operator's xAI OAuth (resolved per-request from /data/.hermes/auth.json,
+# auto-refreshing). gbrain DEPENDS on this being up: if it is down, gbrain's
+# chat/facts/takes calls fail (loudly, thanks to gbrain-loud-llm-failures.sh) —
+# so we launch it BEFORE the autopilot daemon (and thus before the Minions
+# worker / any cycle) and keep it up with a restart-on-crash supervisor.
+#
+# WHY A SUPERVISED LOOP, NOT A BARE nohup. `hermes proxy start` is a foreground
+# blocking server (asyncio.run); it is NOT self-supervising, so a crash would
+# leave gbrain with a dead upstream until the next deploy. We wrap it in a
+# bounded restart loop: on exit it relaunches after a short backoff, capped at
+# ~1 relaunch/5s averaged over time so a hard-failing proxy (e.g. not logged in)
+# can't hot-spin the CPU. The whole block is backgrounded and strictly non-fatal
+# (set +e + `|| true`): a proxy hiccup must never block the Hermes gateway from
+# starting. Idempotent: if something is already listening on :8645 we do not
+# start a second supervisor (a redeploy reuses the volume but each container is
+# fresh, so this mainly guards against a double-invocation of start.sh).
+(
+  set +e
+  PROXY_PORT="${HERMES_PROXY_PORT:-8645}"
+  if ! command -v hermes >/dev/null 2>&1; then
+    echo "[hermes-proxy] WARN: hermes not on PATH; skipping xAI proxy (gbrain LLM upstream will be DOWN)"
+  else
+    # Idempotency guard: is the port already bound? Prefer a /health probe (the
+    # proxy serves GET /health), fall back to a TCP connect via bun if curl is
+    # unavailable. Either positive => assume a live proxy, do not double-launch.
+    already_up=0
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsS --max-time 2 "http://127.0.0.1:${PROXY_PORT}/health" >/dev/null 2>&1 && already_up=1
+    fi
+    if [ "${already_up}" -eq 1 ]; then
+      echo "[hermes-proxy] xAI proxy already responding on :${PROXY_PORT}/health — not launching a second supervisor"
+    else
+      # Pre-flight the credential so the logs say WHY if the proxy can't serve.
+      # Non-fatal: the supervisor still launches and `hermes proxy start` will
+      # print the not-logged-in hint and exit, which the loop surfaces + retries
+      # (a later `hermes auth add xai-oauth` / token refresh makes it recover
+      # without a redeploy).
+      hermes proxy status 2>&1 | grep -iE 'xai|grok' | sed 's/^/[hermes-proxy] status: /' || true
+      echo "[hermes-proxy] arming restart-on-crash supervisor for: hermes proxy start --provider xai --host 127.0.0.1 --port ${PROXY_PORT}"
+      (
+        set +e
+        backoff=2
+        while true; do
+          start_ts=$(date +%s)
+          hermes proxy start --provider xai --host 127.0.0.1 --port "${PROXY_PORT}" \
+            >> /tmp/hermes-proxy.log 2>&1
+          rc=$?
+          end_ts=$(date +%s)
+          ran=$(( end_ts - start_ts ))
+          echo "[hermes-proxy] proxy exited rc=${rc} after ${ran}s — relaunching after ${backoff}s backoff" \
+            >> /tmp/hermes-proxy.log 2>&1
+          # Exponential backoff capped at 30s when the proxy dies FAST (crash
+          # loop / not-logged-in); reset to 2s once it ran for a healthy stretch
+          # (>60s) so a normal long-lived restart recovers quickly.
+          if [ "${ran}" -ge 60 ]; then
+            backoff=2
+          else
+            backoff=$(( backoff * 2 )); [ "${backoff}" -gt 30 ] && backoff=30
+          fi
+          sleep "${backoff}"
+        done
+      ) &
+      echo "[hermes-proxy] supervisor backgrounded (pid $!); proxy logs at /tmp/hermes-proxy.log"
+    fi
+  fi
+) || true
+
 # --- gbrain autopilot bootstrap (canonical ephemeral-container launch) -----
 # gbrain is baked into the image at /usr/local/bun/bin (see Dockerfile). On
 # Railway, gbrain detects an ephemeral container (RAILWAY_ENVIRONMENT is set)

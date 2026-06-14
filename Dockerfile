@@ -122,6 +122,26 @@ RUN bash /app/patches/gbrain-no-anthropic-reroute.sh && \
     bash /app/patches/anthropic-scan.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: grok recipe + FIX-NA-1 repoint (FIX-GROK-1) ------
+# Routes the gbrain knowledge engine's LLM calls through the operator's grok /
+# SuperGrok subscription via the Hermes xAI-OAuth proxy instead of openrouter.
+# (a) writes a KEYLESS openai-compat `grok` recipe (src/core/ai/recipes/grok.ts,
+# base_url http://127.0.0.1:8645/v1 — the localhost proxy supervised in start.sh,
+# which strips the inbound Authorization and attaches the operator's xAI OAuth);
+# (b) registers it in the static recipes/index.ts registry; (c) REPOINTS the
+# FIX-NA-1 reroute target openrouter:auto -> grok:grok-4.3 at the single
+# resolveRecipe chokepoint, so gbrain's hardcoded native `anthropic:` defaults
+# AND a bare grok-4.3 (both normalize to the no-key native path) route to grok.
+# MUST run AFTER gbrain-no-anthropic-reroute.sh (it repoints that patch's emitted
+# literal) and after anthropic-scan.sh (which asserts only the sentinel, not the
+# target, so the repoint does not disturb it). The recipe + its consumer (the
+# reroute) are ONE atomic unit with one smoke gate, so the recipe always exists
+# before anything routes to it. Idempotent; FAILS THE BUILD LOUDLY (old container
+# keeps serving) if an anchor moved. Embeddings stay on zeroentropyai. See
+# patches/gbrain-grok-recipe.meta.yml + UPGRADING_GBRAIN.md.
+RUN bash /app/patches/gbrain-grok-recipe.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch #2: curated MCP tool allowlist -------------------
 # `gbrain serve --http` advertises all ~81 non-localOnly operations over MCP and
 # does NOT filter the tool list by OAuth scope (scope is enforced only at call
