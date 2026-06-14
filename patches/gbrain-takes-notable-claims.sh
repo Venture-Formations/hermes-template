@@ -871,6 +871,10 @@ import { buildGazetteer, type Gazetteer } from './by-mention.ts';"
     my $n = $ENV{C_PAGEROW_NEW};
     s/\Q$o\E/$n/ unless /FIX-TK-2-WIRING: frontmatter is read by resolveSpeaker/;
   ' "$EXTRACT_FILE"
+  # Landing assertion (C.1b PageRow): the preflight only checks the SUBSTRING
+  # 'compiled_truth: string;' (kept short for re-run idempotency), so it can pass
+  # while the full 3-line splice anchor moved → this splice silently no-ops.
+  grep -qF 'FIX-TK-2-WIRING: frontmatter is read by resolveSpeaker' "$EXTRACT_FILE" || { echo "[gbrain-patch:tk-2] ERROR: [C.1b] PageRow.frontmatter field did not land (3-line anchor moved past the preflight substring). RE-POINT." >&2; exit 1; }
 
   C_SELECT_OLD="    \`SELECT id, slug, source_id, type, compiled_truth, updated_at"
   C_SELECT_NEW="    \`SELECT id, slug, source_id, type, compiled_truth, COALESCE(frontmatter, '{}'::jsonb) AS frontmatter, updated_at"
@@ -880,6 +884,12 @@ import { buildGazetteer, type Gazetteer } from './by-mention.ts';"
     my $n = $ENV{C_SELECT_NEW};
     s/\Q$o\E/$n/ unless /COALESCE\(frontmatter/;
   ' "$EXTRACT_FILE"
+  # Landing assertion (C.1b SELECT) — THE critical one: the preflight checks only
+  # the '...compiled_truth,' prefix, so an upstream column added before 'updated_at'
+  # lets preflight pass while this splice silently no-ops → frontmatter is never
+  # SELECTed → resolveSpeaker degrades every holder to 'system' (silent, since bun
+  # does not typecheck and nothing else greps this).
+  grep -qF "COALESCE(frontmatter, '{}'::jsonb) AS frontmatter" "$EXTRACT_FILE" || { echo "[gbrain-patch:tk-2] ERROR: [C.1b] eligible-pages SELECT frontmatter did not land (SELECT anchor moved past the preflight prefix). RE-POINT." >&2; exit 1; }
 
   # ---- C.2 — replace the per-page push-loop with the per-subject fence loop ---
   # The OLD region is the per-page claims loop (extract-takes-from-pages.ts:201-213):
@@ -979,6 +989,11 @@ CLOOP_EOF
     my $new  = $ENV{C_LOOP_NEW};
     s/${open}.*?${term}/$new/s unless /FIX-TK-2-WIRING.*per-subject-entity take write/s;
   ' "$EXTRACT_FILE"
+  # Landing assertion (C.2 loop): both loop anchors ARE exact-preflighted, but this
+  # is belt-and-suspenders for the rare case where a second 'await flush();' between
+  # the anchors shortens the non-greedy match. Grep the loop-unique landed comment
+  # (NOT 'writeTakesToFence', which also appears in the C.1 import → false pass).
+  grep -qF 'per-subject-entity take write' "$EXTRACT_FILE" || { echo "[gbrain-patch:tk-2] ERROR: [C.2] push-loop replacement did not land (takes would stay DB-only, no entity routing). RE-POINT." >&2; exit 1; }
 
   # ---- C.3 — declare the per-run gazetteer cache + resolved local_path -------
   # These two locals are referenced by the new loop. We declare them alongside
