@@ -2,118 +2,126 @@
 # Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
 # If you edit the .sh you MUST re-run the generator (source_sha is checked).
 id: gbrain-schema-pack-resolve-merge
-title: "Resolve expanding schema packs via child-wins merge over extends + borrow_from (FIX-SP-MERGE, upstream #1749 + #1838)"
+title: "Resolve expanding schema packs via child-wins merge over extends + borrow_from (FIX-SP-MERGE, upstream #1749 + #1838) — C+B anchor-splice"
 category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-schema-pack-resolve-merge.sh
-source_sha: "6475c10afb8ca2631055cc91b3dd6be6c56685ddb5bd113392f1576f70b52c70"
-# anchor: the pinned VANILLA 4ee530f sha256 of registry.ts — the load-bearing
-# pre-clobber identity gate. --check verifies this string is in the .sh body;
-# at build time a mismatch FAILS THE BUILD (re-key the drop-in).
-anchor: "4dafc249eeed095bbadd5adba2d2853b3d74b5ee6a6875ef10543b8fe5a9bcac"
+source_sha: "de950d546109cd4ae2065ea0178108b9f510b1599ad2879ed2d2506ab6befb75"
+# anchor: the load-bearing SPLICE anchor — the self-documenting upstream comment
+# that marks where resolvePack still builds from the bare child. --check verifies
+# this string is in the .sh body; at build time the patch's anchor-presence
+# PREFLIGHT fails (exit 1 -> build FAILS, old container keeps serving) if this
+# comment is gone (upstream landed the T20 follow-up -> RETIRE) or any of the 3
+# target tokens moved (-> RE-POINT). This REPLACES the old whole-file sha256 gate
+# (the patch is now a surgical anchor-splice, not a full-file replacement, so a
+# whole-file checksum would churn on every unrelated upstream edit to registry.ts).
+anchor: "// Full extends-merging (child-wins) is the v0.41+ T20 follow-up."
 invariant: >
   src/core/schema-pack/registry.ts carries the VF-FIX-SP-MERGE sentinel and
-  resolvePack composes BOTH axes (child-wins) into resolved.manifest via
-  resolveComposed()/composeManifest(): the EXTENDS chain (root->leaf) feeds all
-  mergeable arrays, and leaf.borrow_from (recursively resolved per borrowed pack,
-  filtered to entry.types/link_types) feeds page_types + link_types ONLY, with the
-  precedence ladder leaf-own > explicit-borrow > extends-inherited. A SINGLE shared
-  visiting-set guards true borrow cycles, and TWO independent budgets bound the graph
-  (#1838): per-path BORROW recursion depth (<=EXTENDS_DEPTH_HARD_CAP, +1 per borrow hop
-  only — NOT extends-chain length, so borrow breadth never false-trips it) AND a shared
-  TOTAL-resolutions cap (MERGE_TOTAL_RESOLUTIONS_CAP=64). filterBorrowed FAILS LOUD
-  (BorrowedTypeNotFoundError) if a borrow names a type/link_type absent from the fully
-  resolved source, and composeManifest FAILS LOUD (DanglingReferenceError) on any merged
-  calibration_domains/mapping_rules/frontmatter_links reference to a missing type/link
-  (the referential checks strict Zod does NOT do). alias_graph/alias_closure_hash
-  recompute over the MERGED manifest; identity/manifest_sha8 stay leaf-anchored. PROOF
-  (run locally
-  @4ee530f): `gbrain schema active` for a pack `extends: gbrain-base-v2` reports the
-  inherited 15 page_types + additions (vf-v1 -> 17/16, not the child's own 2);
-  gbrain-recommended resolves 0/0 -> 30/12; gbrain-everything (extends gbrain-investor
-  -> base, borrow_from creator(atom) + engineer(learning)) resolves WITH atom
-  (primitive=concept, creator's def winning the collision by rule) + learning present;
-  and the HARD no-op invariant holds — gbrain-base-v2 standalone (extends:null AND
-  borrow_from:[]) short-circuits to the child BY REFERENCE (resolved.manifest === the
-  raw parsed manifest object), so it is byte-identical to upstream under ANY
-  serialization. Reproducible anchor (verified locally @4ee530f): the canonical-JSON
-  sha256 (sorted keys, the same canonicalization computeManifestSha8 uses) of the
+  resolvePack composes BOTH axes (child-wins) into resolved.manifest. The patch is
+  an ANCHOR-SPLICE (C+B refactor — NOT a full-file replacement): (1) it widens the
+  two manifest-v1 imports; (2) it inserts, just before the alias-graph build,
+  `const merged = (manifest.extends || (manifest.borrow_from && manifest.borrow_from.length))
+  ? await mergeExtendsChain(manifest, loadByName, opts) : manifest;` and swaps the 3
+  consumers child->merged (buildAliasGraph(manifest)->(merged),
+  computeAliasClosureHash(manifest)->(merged), the ResolvedPack literal field
+  `manifest,`->`manifest: merged,`); (3) it APPENDS, as a pure end-of-file block
+  carrying VF-FIX-SP-MERGE, mergeExtendsChain + resolveComposed + composeManifest +
+  helpers + the BorrowedTypeNotFoundError/DanglingReferenceError classes (this code
+  is LIFTED VERBATIM from the prior proven full-file drop-in, only RELOCATED). The
+  merge: the EXTENDS chain (root->leaf) feeds all mergeable arrays, and
+  leaf.borrow_from (recursively resolved per borrowed pack, filtered to
+  entry.types/link_types) feeds page_types + link_types ONLY, with the precedence
+  ladder leaf-own > explicit-borrow > extends-inherited. A SINGLE shared visiting-set
+  guards true borrow cycles, and TWO independent budgets bound the graph (#1838):
+  per-path BORROW recursion depth (<=EXTENDS_DEPTH_HARD_CAP, +1 per borrow hop only —
+  NOT extends-chain length) AND a shared TOTAL-resolutions cap
+  (MERGE_TOTAL_RESOLUTIONS_CAP=64). filterBorrowed FAILS LOUD (BorrowedTypeNotFoundError)
+  if a borrow names a type/link_type absent from the fully resolved source;
+  composeManifest FAILS LOUD (DanglingReferenceError) on any merged
+  calibration_domains/mapping_rules/frontmatter_links reference to a missing type/link.
+  alias_graph/alias_closure_hash recompute over the MERGED manifest; identity/
+  manifest_sha8 stay leaf-anchored. The inline guard short-circuits a standalone pack
+  (extends:null AND borrow_from:[]) to `: manifest` -> merged === the raw parsed
+  manifest object BY REFERENCE -> byte-identical no-op. GUARD: the whole-file sha256
+  gate is REPLACED by (a) an anchor-presence PREFLIGHT (exit 1 if the T20 comment or
+  any of the 3 target tokens / 2 import lines is absent) AND (b) a perl MATCH-COUNT
+  assertion (each of the 3 substitutions must apply EXACTLY once; 0-or-multi -> exit 1)
+  so the splice can NEVER silently no-op; plus marker idempotency + post-write
+  `gbrain --version` smoke + `tsc --noEmit`. PROOF (run locally @4ee530f, via the
+  CONFIG-ACTIVATION path loadActivePack({dbConfig:<name>}) — NOT `schema use`):
+  a custom pack `extends: gbrain-base-v2` (single-line description, +2 page_types +2
+  link_types) resolves to 17/16 (inherited 15 + own 2); gbrain-everything (extends
+  gbrain-investor -> base, borrow_from creator(atom) + engineer(learning)) resolves to
+  28/12 WITH atom (primitive=concept, creator's def winning the collision by rule) +
+  learning present; and the HARD no-op invariant holds — gbrain-base-v2 standalone
+  resolves 15/14 and resolvePack(base-v2).manifest === the input object (by reference).
+  Reproducible anchor (verified locally @4ee530f): the canonical-JSON sha256 of the
   resolved gbrain-base-v2 manifest =
   b9bebaa4044b406380c2cf4d1260f6ec28d4f20ed1f214a3555672f1c9a72668 (gbrain
-  manifest_sha8 = its 8-hex prefix b9bebaa4; identity gbrain-base-v2@1.0.0+b9bebaa4).
-  resolvePack(base-v2).manifest must be the SAME object reference as the input.
+  manifest_sha8 = b9bebaa4; identity gbrain-base-v2@1.0.0+b9bebaa4).
 still_needed_probe: patches/gbrain-schema-pack-resolve-merge.probe.sh
 target_files:
-  - "gbrain src/core/schema-pack/registry.ts (FULL-FILE REPLACEMENT keyed to 4ee530f content sha256 4dafc249...)"
+  - "gbrain src/core/schema-pack/registry.ts (ANCHOR-SPLICE: import widen + inline `const merged` + 3 consumer swaps, anchored on the v0.41+ T20 follow-up comment, match-count-guarded; plus an additive VF-FIX-SP-MERGE end-of-file block)"
 why: >
+  C+B REFACTOR of the previously-deployed 3-patch schema fix down to ONE patch.
   Upstream #1749 (open, confirmed broken @ 4ee530f): resolvePack walks the extends
   chain ONLY for the depth cap + cache snapshot, then builds ResolvedPack from the
   BARE CHILD manifest — buildAliasGraph(manifest)/computeAliasClosureHash(manifest)
   and the `manifest:` literal all reference the child (upstream's own comment: "Full
   extends-merging (child-wins) is the v0.41+ T20 follow-up"). So a pack with
   `extends: gbrain-base-v2` (the VF goal) collapses to its own types instead of
-  inheriting the 15 page_types + 14 link_types. The patch is a FULL-FILE REPLACEMENT
-  (the merge is a large multi-line rewrite of the chain walk + post-walk block +
-  ResolvedPack consumers — too fragile for an anchor-splice across non-contiguous
-  regions) guarded by a PRE-CLOBBER content-checksum gate (installed registry.ts
-  sha256 must equal the pinned 4ee530f hash 4dafc249...; mismatch FAILS THE BUILD so
-  we re-derive the drop-in rather than clobber a file we did not key to). The drop-in
-  adds composeManifest(): keyed-override+union for page_types/link_types/
-  frontmatter_links/enrichable_types/filing_rules; set-union+floor (fact|take|bet|
-  hunch) for takes_kinds; set-union for phases; keyed for calibration_domains;
-  concat-dedupe + *unknown* retype catch-all forced LAST for mapping_rules; absence-
-  preserving for the .optional() arrays. It writes the merged taxonomy into
-  resolved.manifest (the field every consumer reads), recomputes alias graph/closure
-  over the merged manifest, keeps identity/manifest_sha8 leaf-anchored (already true
-  upstream — no work), and short-circuits standalone packs to a byte-identical no-op.
-  SCOPE NOW COVERS THE FULL EXPANDING-SCHEMA FEATURE — EXTENDS *AND* borrow_from.
-  resolveComposed() recursively resolves each borrowed pack to its FULL manifest (its
-  own extends+borrow composed) then filters to the borrow entry's types/link_types,
-  contributing to page_types + link_types ONLY (exactly the two arrays the borrow_from
-  schema carries — NOT phases/calibration_domains/filing_rules/takes_kinds, which the
-  lens YAMLs re-declare explicitly by design). PRECEDENCE (specificity): leaf-own >
-  explicit-borrow > extends-inherited(root->leaf) — a borrow is a DELIBERATE pull of a
-  named def so it beats generic inheritance; this decides the red-team's
-  creator.atom-vs-base.atom collision by RULE (everything's atom = creator's,
-  primitive=concept). The #1838 borrow stack-overflow is killed by a SINGLE shared
-  visiting-set (true borrow cycle = re-entry on the active borrow path -> throws
-  ExtendsChainTooDeepError) + TWO independent budgets: per-path borrow-recursion depth
-  (+1 PER BORROW HOP, bounded by EXTENDS_DEPTH_HARD_CAP=8) and a shared total-resolutions
-  cap (MERGE_TOTAL_RESOLUTIONS_CAP=64). Borrow breadth is NOT counted as extends depth,
-  so a pack borrowing many shallow siblings is not falsely capped; the extends chain
-  keeps its own leaf-inclusive length cap. Sibling borrows sharing an ancestor (the
-  everything->base-via-extends + creator/engineer-borrow-which-extend-base diamond) are
-  NOT mis-flagged — visiting holds only the active borrow-path pack names, never
-  extends-parents, and each frame removes exactly the name it added. HARDENING (red-team
-  §3/§4): filterBorrowed FAILS LOUD (BorrowedTypeNotFoundError) when a borrow names a
-  type/link_type absent from the fully resolved source pack (a silent drop would leave a
-  dangling calibration/mapping ref that Zod misses), and composeManifest FAILS LOUD
-  (DanglingReferenceError) on any merged calibration_domains[].page_types /
-  mapping_rules retype.to_type|page_to_link.link_type / frontmatter_links[].page_type|
-  link_type pointing at a type/link not in the merged taxonomy — porting the registry's
-  documented-but-uncodified referential post-checks onto the MERGED manifest. Borrows
-  resolve sequentially in declared order (later-declared wins a key collision) with plain
-  set()/Map merges -> cold-run deterministic. The leaf-only
-  ref-eq fast path AND the by-ref short-circuit are both gated to the standalone
-  predicate (extends:null AND borrow_from:[]) so leaf==merged stays sound and a
-  parent/borrowed-pack edit can never serve a stale merge in-process — the cache
-  `chain` now records borrowed deps too, so invalidatePackCache cascades on a
-  borrowed-pack edit. NOT filed upstream (operator decision — VF-only fork patch).
-  Proven locally end-to-end on a pristine 4ee530f clone + via the baked patch on a
-  Docker-equivalent tree: recommended 0/0->30/12, vf-v1(extends base-v2)->17/16,
-  gbrain-everything gains atom+learning via borrow, base-v2 no-op hash unchanged,
-  schema-pack tests pass.
+  inheriting 15 page_types + 14 link_types, and the bundled lens meta-pack
+  gbrain-everything resolves to 0/0 (never composes borrow_from, #1838). THE AUDIT
+  FINDING: the inheritance engine lives ENTIRELY in resolvePack, and the
+  CONFIG-ACTIVATION path (DB/tier `cfg.schema_pack` -> defaultPackLocator ->
+  resolvePack) exercises that merge IDENTICALLY to `schema use`. defaultPackLocator
+  already lists all 7 bundled packs AND locates installed ~/.gbrain/schema-packs/<name>
+  packs. So a custom `extends: gbrain-base-v2` pack activated via
+  `gbrain config set schema_pack <name>` resolves FULLY without the former SSOT patch,
+  and the lens packs compose via config activation. THE TWO COMPANION PATCHES WERE
+  DROPPED (proven unnecessary for the config-activation path), with documented,
+  accepted DX losses: (1) the loader.ts js-yaml block-scalar patch (#1750) — custom
+  packs must now use a SINGLE-LINE `description:` (no `|` block); (2) the bundled-SSOT
+  patch (#1574/#1726) — a custom/lens pack is activated via `gbrain config set
+  schema_pack <name>`, NOT `schema use <name>` (which prints "Unknown pack" for
+  non-{base,recommended} names — a CLI that lies about its own state; documented in
+  UPGRADING_GBRAIN.md), `schema list` shows 2 not 7, and gbrain-recommended reverts to
+  0-types (its `description: |` truncates again — irrelevant to us). The retained merge
+  patch is converted from FULL-FILE REPLACEMENT to a surgical ANCHOR-SPLICE of
+  registry.ts: the merge machinery (composeManifest/resolveComposed/mergeExtendsChain +
+  helpers + the two fail-loud error classes) is LIFTED VERBATIM from the proven
+  full-file drop-in into an additive end-of-file block, and a 4-token inline splice
+  (insert `const merged`, swap the 2 alias consumers + the ResolvedPack literal) wires
+  it in. SCOPE COVERS THE FULL EXPANDING-SCHEMA FEATURE — EXTENDS *AND* borrow_from.
+  PRECEDENCE (specificity): leaf-own > explicit-borrow > extends-inherited(root->leaf)
+  — a borrow is a DELIBERATE pull of a named def so it beats generic inheritance; this
+  decides the red-team's creator.atom-vs-base.atom collision by RULE (everything's atom =
+  creator's, primitive=concept). The #1838 borrow stack-overflow is killed by a SINGLE
+  shared visiting-set + TWO independent budgets (per-path borrow depth <=8, total
+  resolutions <=64). HARDENING (red-team §3/§4): filterBorrowed FAILS LOUD
+  (BorrowedTypeNotFoundError) on a borrow naming a type absent from the resolved source;
+  composeManifest FAILS LOUD (DanglingReferenceError) on a dangling
+  calibration/mapping/frontmatter reference in the merged taxonomy. GUARD STRATEGY: the
+  old pre-clobber whole-file sha256 gate is REPLACED by an anchor-presence preflight +
+  a perl match-count assertion (the splice can NEVER silently no-op — when upstream
+  ships T20 the comment changes -> preflight fails LOUD -> we delete the patch). NOT
+  filed upstream (operator decision — VF-only fork patch). Proven locally end-to-end on
+  a pristine 4ee530f clone via the config-activation path: vf-v1(extends base-v2)->17/16,
+  gbrain-everything->28/12 with atom+learning, base-v2 standalone 15/14 by-ref no-op
+  (sha8 b9bebaa4 unchanged), the perturbed-anchor splice EXITS 1 (fail-loud), tsc
+  --noEmit clean, and 327 schema-pack/resolver tests pass.
 reapply: docker-build
 deprecate_when: >
   garrytan/gbrain lands the T20 extends-merge follow-up AND composes borrow_from
   (#1749 + #1838) so resolvePack builds the resolved pack from the MERGED extends+
-  borrow chain (not the bare child), and GBRAIN_REF advances past it. On ANY
-  GBRAIN_REF bump the pre-clobber checksum gate fails the build first
-  (registry.ts changed) — re-read the upstream file, re-key the drop-in to the new
-  content sha (UPGRADING_GBRAIN.md -> "Re-keying a full-file-replacement patch"), or
-  retire if upstream fixed it. The still_needed_probe checks whether the bare-child
-  anchor/comment is gone and a merge is present.
+  borrow chain (not the bare child), and GBRAIN_REF advances past it. On the upgrade,
+  the anchor-presence PREFLIGHT fails the build (the "v0.41+ T20 follow-up" comment is
+  gone or the 3 target tokens moved) — re-read the upstream registry.ts and either
+  RE-POINT the splice (UPGRADING_GBRAIN.md -> "Re-pointing the schema-pack merge
+  anchor-splice") or RETIRE if upstream fixed it. The still_needed_probe checks whether
+  the bare-child anchor/comment is gone and a merge is present.
 added: "2026-06-13"
 last_validated_ref: "gbrain@4ee530f"
 upstream: garrytan/gbrain

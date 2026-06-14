@@ -17,57 +17,58 @@
 #   `everything` is missing `atom` + `learning`, and a naive borrow walker
 #   stack-overflows on a borrowed pack that itself extends/borrows.
 #
-# WHAT THIS PATCH DOES
-#   FULL-FILE REPLACEMENT of src/core/schema-pack/registry.ts with a corrected
-#   drop-in keyed to GBRAIN_REF=4ee530f3c545b880cecc47c4f877e0ed014896b4. The
-#   drop-in adds composeManifest() — child-wins over BOTH composition axes:
-#     • EXTENDS (root→leaf) over ALL mergeable arrays (page_types/link_types/
-#       frontmatter_links/enrichable_types/filing_rules keyed-override+union;
-#       takes_kinds set-union w/ fact|take|bet|hunch floor; phases set-union;
-#       calibration_domains keyed; mapping_rules concat-dedupe w/ *unknown*
-#       retype catch-all forced LAST).
-#     • BORROW (leaf.borrow_from, declared order) over page_types + link_types
-#       ONLY (exactly the two arrays the manifest borrow_from schema carries —
-#       {pack, types?, link_types?}; borrow does NOT contribute phases /
-#       calibration_domains / filing_rules / takes_kinds — matches the YAML's
-#       own "borrow_from borrows types/link_types only" contract). Each
-#       borrowed pack is resolved RECURSIVELY to its FULL manifest (its own
-#       extends+borrow composed) then FILTERED to entry.types / entry.link_types.
-#   PRECEDENCE (specificity): leaf-own > explicit-borrow > extends-inherited
-#     (root→leaf, nearer-leaf wins). A borrow is a DELIBERATE pull of one
-#     named definition, so it beats the generic extends-inherited same-named
-#     type; the leaf's own inline declaration beats everything. For
-#     `gbrain-everything` this yields atom = creator's (primitive=concept),
-#     resolving the red-team's creator.atom-vs-base.atom collision by rule.
-#   It writes the merged taxonomy into resolved.manifest (the field every
-#   consumer reads), recomputes alias_graph/alias_closure_hash over the MERGED
-#   manifest, keeps identity/manifest_sha8 LEAF-anchored (already true
-#   upstream), and re-validates output through the strict Zod schema. A
-#   standalone pack (extends:null AND borrow_from empty) short-circuits to the
-#   child BY REFERENCE → byte-identical no-op (base/base-v2 sha8 unchanged).
-#   The leaf-only ref-eq fast path is gated to that same standalone predicate
-#   (sound: leaf==merged) so a parent/borrowed-pack edit can never serve a
-#   stale merge in-process. CYCLE/DEPTH SAFE: a SINGLE shared visiting-set
-#   (true borrow cycle → throw) + TWO independent budgets — per-path borrow
-#   recursion depth (+1 PER BORROW HOP, ≤ EXTENDS_DEPTH_HARD_CAP) AND a shared
-#   total-resolutions cap (MERGE_TOTAL_RESOLUTIONS_CAP) — bound the combined
-#   extends+borrow graph (kills the #1838 borrow stack-overflow) without
-#   counting borrow breadth as extends depth; the extends chain keeps its own
-#   leaf-inclusive length cap. FAIL-LOUD HARDENING: a borrow naming a
-#   type/link_type absent from the resolved source throws
-#   BorrowedTypeNotFoundError, and the MERGED manifest is referentially
-#   checked (calibration_domains / mapping_rules / frontmatter_links must
-#   resolve) → DanglingReferenceError (the checks strict Zod does NOT do).
-#   Borrow entries resolve sequentially in declared order (later-declared wins
-#   a key collision) with plain set() merges → cold-run deterministic.
+# WHAT THIS PATCH DOES  (C+B refactor: ANCHOR-SPLICE, not full-file replace)
+#   The inheritance engine lives ENTIRELY in resolvePack: the
+#   config-activation path (DB/tier-6 cfg.schema_pack → defaultPackLocator →
+#   resolvePack) exercises the SAME merge as `schema use`. So the ONE change
+#   gbrain actually needs is to feed resolvePack's downstream consumers the
+#   MERGED manifest instead of the bare child. This patch does exactly that
+#   with a minimal, fail-loud anchor-splice (the YAML #1750 + SSOT #1574/#1726
+#   full-file patches were DROPPED — see the C+B audit / UPGRADING_GBRAIN.md):
 #
-# ANCHOR / GUARD STRATEGY
-#   PRE-CLOBBER sha256 guard: registry.ts must be the pristine 4ee530f blob
-#   (4dafc249…) before overwrite. Mismatch ⇒ upstream changed the file ⇒
-#   exit 1 ⇒ Docker build FAILS (old container keeps serving). Re-key the
-#   drop-in (UPGRADING_GBRAIN.md → "Re-keying a full-file-replacement patch").
-#   Idempotency: marker VF-FIX-SP-MERGE makes a re-run a no-op. Post-write
-#   audit re-greps the marker.
+#   (1) IMPORT SPLICE — widen the two manifest-v1 imports so the appended block
+#       can reference PackPageType/PackLinkType/PackMappingRule (types) and
+#       parseSchemaPackManifest (value).
+#   (2) INLINE SPLICE in resolvePack, anchored on the self-documenting
+#       "// Full extends-merging (child-wins) is the v0.41+ T20 follow-up."
+#       comment block (when upstream lands T20 the comment changes → the anchor
+#       preflight below fails LOUD → we delete this patch):
+#         • INSERT `const merged = (manifest.extends || (manifest.borrow_from
+#           && manifest.borrow_from.length)) ? mergeExtendsChain(manifest,
+#           loadByName, opts) : manifest;` just before the alias-graph build.
+#         • SWAP the 3 consumers child→merged: buildAliasGraph(manifest)→(merged),
+#           computeAliasClosureHash(manifest)→(merged), and the ResolvedPack
+#           literal field `manifest,` → `manifest: merged,`.
+#   (3) EOF APPEND (additive, marker VF-FIX-SP-MERGE) — mergeExtendsChain (an
+#       async wrapper over resolveComposed), the compose machinery
+#       (composeManifest + mergeKeyed/mergeKeyedOptional/mergeStringsWithFloor/
+#       mergeOptionalStrings/mergeMappingRules/canonicalKey, filterBorrowed,
+#       resolveComposed, assertNoDanglingReferences) and the
+#       BorrowedTypeNotFoundError/DanglingReferenceError classes. This code is
+#       LIFTED VERBATIM from the proven full-file drop-in — only RELOCATED to a
+#       pure end-of-file block. Semantics (child-wins over BOTH axes; precedence
+#       leaf-own > explicit-borrow > extends-inherited; shared visiting-set
+#       cycle guard + two budgets; standalone packs short-circuit BY REFERENCE
+#       → byte-identical no-op) are unchanged from the proven version.
+#
+#   Because mergeExtendsChain returns the child BY REFERENCE for a standalone
+#   pack (extends:null AND borrow_from empty), AND the inline `const merged`
+#   guard only calls it when extends/borrow_from is present, a flat pack
+#   (base/base-v2) takes the `: manifest` branch → `merged === manifest` →
+#   buildAliasGraph(merged) === buildAliasGraph(manifest): byte-identical no-op
+#   (base-v2 manifest_sha8 stays b9bebaa4).
+#
+# ANCHOR / GUARD STRATEGY  (replaces the old whole-file sha256 guard)
+#   (a) ANCHOR-PRESENCE PREFLIGHT — exit 1 (build FAILS, old container keeps
+#       serving) if the T20 comment OR any of the 3 target tokens is absent
+#       (upstream moved the anchor / landed T20 → RE-POINT or RETIRE).
+#   (b) MATCH-COUNT ASSERTION — each of the 3 substitutions MUST apply exactly
+#       once (perl returns the count); 0 ⇒ exit 1. The splice can NEVER silently
+#       no-op. (We do NOT pin a whole-file checksum: the splice is surgical and
+#       self-verifying; a checksum gate would just churn on every unrelated
+#       upstream edit to registry.ts.)
+#   Idempotency: marker VF-FIX-SP-MERGE makes a re-run a no-op. Post-write:
+#   marker re-grep + `gbrain --version` smoke + `tsc --noEmit` on registry.ts.
 #
 # gbrain CORE modification — applied at Docker BUILD after the gbrain install,
 # baked in, re-applied on every GBRAIN_REF bump. RE-VALIDATE ON EVERY UPGRADE.
@@ -76,10 +77,11 @@
 set -euo pipefail
 GBRAIN_SRC=""
 for d in \
+  "${GBRAIN_SRC_OVERRIDE:-}" \
   "${BUN_INSTALL:-/usr/local/bun}/install/global/node_modules/gbrain/src" \
   "/usr/local/bun/install/global/node_modules/gbrain/src" \
   "${HOME:-/root}/.bun/install/global/node_modules/gbrain/src"; do
-  if [ -d "$d" ]; then GBRAIN_SRC="$d"; break; fi
+  if [ -n "$d" ] && [ -d "$d" ]; then GBRAIN_SRC="$d"; break; fi
 done
 if [ -z "$GBRAIN_SRC" ]; then echo "[sp-merge] ERROR: gbrain src tree not found." >&2; exit 1; fi
 echo "[sp-merge] target: $GBRAIN_SRC"
@@ -87,309 +89,77 @@ REG="$GBRAIN_SRC/core/schema-pack/registry.ts"
 [ -f "$REG" ] || { echo "[sp-merge] ERROR: $REG not found — layout changed. RE-POINT." >&2; exit 1; }
 MARKER='VF-FIX-SP-MERGE'
 if grep -qF "$MARKER" "$REG"; then echo "[sp-merge] ✓ already applied; no-op."; exit 0; fi
-sha_of(){ sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'; }
-REG_VANILLA_SHA="4dafc249eeed095bbadd5adba2d2853b3d74b5ee6a6875ef10543b8fe5a9bcac"
-GOT="$(sha_of "$REG")"
-if [ "$GOT" != "$REG_VANILLA_SHA" ]; then
-  echo "[sp-merge] ERROR: registry.ts drift — NOT the 4ee530f version." >&2
-  echo "[sp-merge]   expected $REG_VANILLA_SHA" >&2
-  echo "[sp-merge]   got      $GOT" >&2
-  echo "[sp-merge]   RE-KEY THIS DROP-IN (UPGRADING_GBRAIN.md → 'Re-keying a full-file-replacement patch')." >&2
+
+# ---- (a) ANCHOR-PRESENCE PREFLIGHT --------------------------------------
+# All anchors must be present in the PRISTINE shape before we splice. Any
+# absence ⇒ upstream moved the anchor or landed the T20 follow-up ⇒ FAIL LOUD.
+ANCHOR_T20='// Full extends-merging (child-wins) is the v0.41+ T20 follow-up.'
+ANCHOR_AG='const alias_graph = buildAliasGraph(manifest);'
+ANCHOR_CH='const alias_closure_hash = await computeAliasClosureHash(manifest);'
+ANCHOR_LIT_RE='^    manifest,$'
+miss=0
+grep -qF "$ANCHOR_T20" "$REG" || { echo "[sp-merge] ANCHOR MISSING: T20 follow-up comment (upstream may have LANDED the merge → review/RETIRE this patch)." >&2; miss=1; }
+grep -qF "$ANCHOR_AG"  "$REG" || { echo "[sp-merge] ANCHOR MISSING: 'const alias_graph = buildAliasGraph(manifest);' → RE-POINT." >&2; miss=1; }
+grep -qF "$ANCHOR_CH"  "$REG" || { echo "[sp-merge] ANCHOR MISSING: 'const alias_closure_hash = await computeAliasClosureHash(manifest);' → RE-POINT." >&2; miss=1; }
+grep -qE "$ANCHOR_LIT_RE" "$REG" || { echo "[sp-merge] ANCHOR MISSING: ResolvedPack literal field '    manifest,' → RE-POINT." >&2; miss=1; }
+# import anchors (the two manifest-v1 import lines we widen)
+ANCHOR_IMP_TYPE="import type { SchemaPackManifest } from './manifest-v1.ts';"
+ANCHOR_IMP_VAL="import { computeManifestSha8, packIdentity } from './manifest-v1.ts';"
+grep -qF "$ANCHOR_IMP_TYPE" "$REG" || { echo "[sp-merge] ANCHOR MISSING: manifest-v1 type-import line → RE-POINT." >&2; miss=1; }
+grep -qF "$ANCHOR_IMP_VAL"  "$REG" || { echo "[sp-merge] ANCHOR MISSING: manifest-v1 value-import line → RE-POINT." >&2; miss=1; }
+if [ "$miss" != "0" ]; then
+  echo "[sp-merge] ERROR: one or more anchors absent — the splice would be unsafe. RE-POINT or RETIRE (UPGRADING_GBRAIN.md → 'Re-pointing the schema-pack merge anchor-splice')." >&2
   exit 1
 fi
-echo "[sp-merge] pre-clobber guard OK (registry.ts is pristine 4ee530f)."
-# ---- registry.ts (corrected drop-in, carries marker VF-FIX-SP-MERGE) ----
-cat > "$REG" <<'VF_PATCH_EOF'
-// v0.38 schema pack registry — load, cache, resolve active pack.
-//
-//                  ┌──────────────────────────────────────────────────────┐
-//                  │   loadActivePack lifecycle (per process, v0.40.6.0)  │
-//                  └──────────────────────────────────────────────────────┘
-//                                       │
-//              ┌────────────────────────┼────────────────────────┐
-//              ▼                        ▼                        ▼
-//       cache miss               cache hit                cache hit + TTL expired
-//              │                        │                        │
-//       fresh load               STAT_TTL_MS gate         statSync compare every file
-//       (resolvePack)             (~10ns fast return)     in the extends chain
-//              │                        │                        │
-//              │                        │              ┌──────────┴──────────┐
-//              │                        │              ▼                     ▼
-//              │                        │      every mtime unchanged    any mtime changed
-//              │                        │              │                     │
-//              │                        │      refresh lastStatMs   invalidate(name) +
-//              │                        │      return cached         extends-chain cascade
-//              │                        │                                  (codex C6)
-//              ▼                        ▼                                   │
-//       byName.set(name, entry)   return cached                       fresh load
-//
-// Pack resolution chain (7 tiers per D13, tier-1 trust-gated):
-//   1. Per-call `schema_pack` opt — CLI only (`ctx.remote === false`).
-//      Rejected for `ctx.remote === true` (D13 trust boundary).
-//   2. `GBRAIN_SCHEMA_PACK` env var
-//   3. Per-source DB config key `schema_pack.source.<id>`
-//   4. Brain-wide DB config key `schema_pack`
-//   5. `gbrain.yml schema:` section
-//   6. `~/.gbrain/config.json schema_pack` field
-//   7. Default `gbrain-base`
-//
-// Extends chain semantics (E4):
-//   - Depth tracked via BFS during resolve.
-//   - Soft warn to stderr at depth > 4.
-//   - Hard reject at depth > 8.
-//
-// v0.40.6.0 cache invariants (codex C6 + D11 + D13):
-//   - Cache key is the pack NAME (not identity sha8). Per-name cache entry
-//     records the resolved pack PLUS every file path that fed it AND the
-//     identities of every parent in the extends chain.
-//   - Cache hits go through a stat-TTL gate (default 1000ms via
-//     STAT_TTL_MS, env override GBRAIN_PACK_STAT_TTL_MS). Inside the
-//     window: hot-path return (~10ns). Outside: statSync each file; if
-//     any mtime changed, invalidate by name + cascade to every dependent.
-//   - invalidatePackCache(name) walks the reverse extends-graph and
-//     evicts every pack that has `name` in its chain. Without the cascade,
-//     editing a parent silently leaves children stale (the codex C6 bug).
-//   - The PUBLIC `ResolvedPack.identity` field is unchanged
-//     (`<name>@<version>+<sha8>`); the composite cache key lives only
-//     inside the registry.
+echo "[sp-merge] anchor preflight OK (all 6 anchors present)."
 
-import { statSync } from 'node:fs';
-import type {
-  SchemaPackManifest,
-  PackPageType,
-  PackLinkType,
-  PackMappingRule,
-} from './manifest-v1.ts';
-import {
-  computeManifestSha8,
-  packIdentity,
-  parseSchemaPackManifest,
-} from './manifest-v1.ts';
-import { computeAliasClosureHash, buildAliasGraph, type AliasGraph } from './closure.ts';
+# ---- (b) THE SPLICE (perl, with match-count assertions) -----------------
+# Each substitution returns the number of replacements; we assert == 1 so the
+# splice can NEVER silently no-op (the green-but-broken hole under a splice).
+perl -0777 -i -pe '
+  our $imp_type = s/\Qimport type { SchemaPackManifest } from '"'"'.\/manifest-v1.ts'"'"';\E/import type {\n  SchemaPackManifest,\n  PackPageType,\n  PackLinkType,\n  PackMappingRule,\n} from '"'"'.\/manifest-v1.ts'"'"';/g;
+  END { $main::imp_type = $imp_type }
+' "$REG"
+perl -0777 -i -pe '
+  our $imp_val = s/\Qimport { computeManifestSha8, packIdentity } from '"'"'.\/manifest-v1.ts'"'"';\E/import {\n  computeManifestSha8,\n  packIdentity,\n  parseSchemaPackManifest,\n} from '"'"'.\/manifest-v1.ts'"'"';/g;
+  END { $main::imp_val = $imp_val }
+' "$REG"
 
-export const EXTENDS_DEPTH_WARN = 4 as const;
-export const EXTENDS_DEPTH_HARD_CAP = 8 as const;
-export const STAT_TTL_MS_DEFAULT = 1000 as const;
-// VF-FIX-SP-MERGE (adversarial §5b): TWO independent budgets bound the
-// combined extends+borrow graph. (1) EXTENDS_DEPTH_HARD_CAP is the per-path
-// EXTENDS chain length (unchanged public const) AND, applied separately, the
-// per-path BORROW recursion depth (kills the #1838 borrow→borrow ladder).
-// Borrow BREADTH is NOT extends depth — a pack borrowing many shallow siblings
-// must not blow the extends cap. (2) MERGE_TOTAL_RESOLUTIONS_CAP bounds the
-// TOTAL number of resolveComposed() frames for one top-level resolve, catching
-// a wide-and-deep graph that no single per-path cap would. Both throw
-// ExtendsChainTooDeepError (the wire-stable error class).
-export const MERGE_TOTAL_RESOLUTIONS_CAP = 64 as const;
+# Insert `const merged = …` immediately before the alias_graph build, then swap
+# the two alias consumers and the ResolvedPack literal field. We do these as
+# separate perl invocations so each returns its own count.
+INS='const merged = (manifest.extends || (manifest.borrow_from && manifest.borrow_from.length)) ? await mergeExtendsChain(manifest, loadByName, opts) : manifest;'
+# 1: insert const merged before the alias_graph line (anchored on that line)
+C1=$(perl -0777 -i -pe 'BEGIN{$c=0} $c += s/(\n)(  const alias_graph = buildAliasGraph\(manifest\);)/$1  '"$INS"'$1$2/g; END{print STDERR "C1=$c\n"}' "$REG" 2>&1 >/dev/null; true)
+# 2: swap buildAliasGraph(manifest) -> (merged)
+C2=$(perl -0777 -i -pe 'BEGIN{$c=0} $c += s/buildAliasGraph\(manifest\)/buildAliasGraph(merged)/g; END{print STDERR "C2=$c\n"}' "$REG" 2>&1 >/dev/null; true)
+# 3: swap computeAliasClosureHash(manifest) -> (merged)
+C3=$(perl -0777 -i -pe 'BEGIN{$c=0} $c += s/computeAliasClosureHash\(manifest\)/computeAliasClosureHash(merged)/g; END{print STDERR "C3=$c\n"}' "$REG" 2>&1 >/dev/null; true)
+# 4: swap the ResolvedPack literal field `    manifest,` -> `    manifest: merged,`
+C4=$(perl -0777 -i -pe 'BEGIN{$c=0} $c += s/^    manifest,$/    manifest: merged,/mg; END{print STDERR "C4=$c\n"}' "$REG" 2>&1 >/dev/null; true)
 
-export class ExtendsChainTooDeepError extends Error {
-  readonly depth: number;
-  readonly chain: string[];
-  constructor(depth: number, chain: string[]) {
-    super(`pack extends chain depth ${depth} exceeds hard cap ${EXTENDS_DEPTH_HARD_CAP}: ${chain.join(' → ')}`);
-    this.name = 'ExtendsChainTooDeepError';
-    this.depth = depth;
-    this.chain = chain;
-  }
-}
+getc(){ echo "$1" | sed -n 's/^C[0-9]=//p'; }
+n1=$(getc "$C1"); n2=$(getc "$C2"); n3=$(getc "$C3"); n4=$(getc "$C4")
+echo "[sp-merge] splice match-counts: const-merged=$n1 buildAliasGraph=$n2 computeAliasClosureHash=$n3 literal=$n4"
+fail=0
+[ "$n1" = "1" ] || { echo "[sp-merge] MATCH-COUNT FAIL: const-merged insertion applied $n1 times (expected 1)." >&2; fail=1; }
+[ "$n2" = "1" ] || { echo "[sp-merge] MATCH-COUNT FAIL: buildAliasGraph swap applied $n2 times (expected 1)." >&2; fail=1; }
+[ "$n3" = "1" ] || { echo "[sp-merge] MATCH-COUNT FAIL: computeAliasClosureHash swap applied $n3 times (expected 1)." >&2; fail=1; }
+[ "$n4" = "1" ] || { echo "[sp-merge] MATCH-COUNT FAIL: ResolvedPack literal swap applied $n4 times (expected 1)." >&2; fail=1; }
+if [ "$fail" != "0" ]; then
+  echo "[sp-merge] ERROR: splice did not apply cleanly — registry.ts shape drifted. RE-POINT." >&2
+  exit 1
+fi
 
-export class UnknownPackError extends Error {
-  readonly name_: string;
-  constructor(name_: string) {
-    super(`unknown schema pack: ${name_}`);
-    this.name = 'UnknownPackError';
-    this.name_ = name_;
-  }
-}
-
-// VF-FIX-SP-MERGE: a borrow_from entry named a type/link_type that, after
-// fully resolving the borrowed pack (its own extends+borrow), is NOT present.
-// FAIL LOUD (adversarial §4): a silently-dropped borrowed type can leave a
-// dangling calibration_domains/mapping_rules reference that strict Zod does
-// NOT catch (those arrays carry bare string refs, no existence check), so a
-// silent drop would ship a structurally-broken pack. Throwing here turns the
-// dangling-ref into a build/load failure with a paste-ready hint instead.
-export class BorrowedTypeNotFoundError extends Error {
-  readonly borrower: string;
-  readonly borrowedPack: string;
-  readonly axis: 'types' | 'link_types';
-  readonly missing: string[];
-  constructor(borrower: string, borrowedPack: string, axis: 'types' | 'link_types', missing: string[]) {
-    super(
-      `pack "${borrower}" borrow_from {pack: ${borrowedPack}, ${axis}: [...]} ` +
-      `names ${axis} absent from the resolved "${borrowedPack}" pack: ${missing.join(', ')}. ` +
-      `Fix the borrow_from entry or the borrowed pack's declarations.`,
-    );
-    this.name = 'BorrowedTypeNotFoundError';
-    this.borrower = borrower;
-    this.borrowedPack = borrowedPack;
-    this.axis = axis;
-    this.missing = missing;
-  }
-}
-
-// VF-FIX-SP-MERGE: the merged manifest carries a dangling cross-reference
-// (calibration_domains[].page_types / mapping_rules[].to_type|link_type /
-// frontmatter_links[].page_type|link_type) that points at a type/link_type
-// NOT in the merged page_types/link_types. The strict Zod schema does NOT
-// enforce these (they are bare string[] / string fields — adversarial §3),
-// so without this guard a composition that drops/renames a referenced type
-// would Zod-pass and surface as a runtime aggregator/migration error. FAIL
-// LOUD at compose time over the MERGED manifest instead.
-export class DanglingReferenceError extends Error {
-  readonly pack: string;
-  readonly problems: string[];
-  constructor(pack: string, problems: string[]) {
-    super(`merged pack "${pack}" has dangling references: ${problems.join('; ')}`);
-    this.name = 'DanglingReferenceError';
-    this.pack = pack;
-    this.problems = problems;
-  }
-}
-
-export interface ResolvedPack {
-  manifest: SchemaPackManifest;
-  identity: string;        // `<name>@<version>+<sha8>` (child only — wire-stable)
-  manifest_sha8: string;
-  alias_closure_hash: string;
-  alias_graph: AliasGraph;
-}
-
-export interface ResolutionInput {
-  perCall?: string;
-  remote: boolean;
-  perSourceDb?: ReadonlyMap<string, string>;
-  sourceId?: string;
-  envVar?: string;
-  dbConfig?: string;
-  gbrainYml?: string;
-  homeConfig?: string;
-}
-
-export interface ResolutionResult {
-  pack_name: string;
-  source: 'per-call' | 'env' | 'per-source-db' | 'db-config' | 'gbrain-yml' | 'home-config' | 'default';
-}
-
-export function resolveActivePackName(input: ResolutionInput): ResolutionResult {
-  if (input.perCall && input.remote === false) {
-    return { pack_name: input.perCall, source: 'per-call' };
-  }
-  if (input.envVar) return { pack_name: input.envVar, source: 'env' };
-  if (input.sourceId && input.perSourceDb?.has(input.sourceId)) {
-    return { pack_name: input.perSourceDb.get(input.sourceId)!, source: 'per-source-db' };
-  }
-  if (input.dbConfig) return { pack_name: input.dbConfig, source: 'db-config' };
-  if (input.gbrainYml) return { pack_name: input.gbrainYml, source: 'gbrain-yml' };
-  if (input.homeConfig) return { pack_name: input.homeConfig, source: 'home-config' };
-  return { pack_name: 'gbrain-base', source: 'default' };
-}
-
-/**
- * Per-name cache entry. Tracks the resolved pack PLUS the file-stat
- * snapshot every file in the extends chain fed at resolve time. The
- * stat snapshot is what the cross-process stat-TTL gate compares
- * against on each loadActivePack call.
- */
-interface CacheEntry {
-  resolved: ResolvedPack;
-  /** Names that fed this entry (this pack + every parent transitively). */
-  chain: ReadonlyArray<string>;
-  /** Stat snapshot per file at resolve time. */
-  files: ReadonlyArray<{ name: string; path: string; mtimeMs: number }>;
-  /** Last time we stat()'d the files. Date.now() ms. */
-  lastStatMs: number;
-}
-
-const _byName = new Map<string, CacheEntry>();
-
-/** Test seam — clears the in-process resolver cache. */
-export function _resetPackCacheForTests(): void {
-  _byName.clear();
-}
-
-/**
- * Resolve the effective STAT_TTL_MS, honoring the
- * `GBRAIN_PACK_STAT_TTL_MS` env override. Invalid values fall back to
- * the default with no warning (this is a power-user knob).
- */
-function resolveStatTtlMs(): number {
-  const raw = process.env.GBRAIN_PACK_STAT_TTL_MS;
-  if (!raw) return STAT_TTL_MS_DEFAULT;
-  const parsed = Number.parseInt(raw, 10);
-  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
-  return STAT_TTL_MS_DEFAULT;
-}
-
-/**
- * Cheap statSync that returns Infinity on error so callers treat
- * disappearing files as "changed" (forcing reload).
- */
-function safeMtimeMs(path: string): number {
-  try {
-    return statSync(path).mtimeMs;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
-}
-
-/**
- * Check whether a cached entry's file snapshot is still fresh on disk.
- * Returns true when EVERY file's mtime matches the snapshot.
- */
-function snapshotMatches(files: ReadonlyArray<{ path: string; mtimeMs: number }>): boolean {
-  for (const f of files) {
-    if (safeMtimeMs(f.path) !== f.mtimeMs) return false;
-  }
-  return true;
-}
-
-/**
- * Walk the reverse extends-graph: every cached entry whose `chain`
- * contains `name`. The set is unbounded in principle but bounded in
- * practice by EXTENDS_DEPTH_HARD_CAP × installed packs (typically <50).
- */
-function findDependents(name: string): string[] {
-  const out: string[] = [];
-  for (const [cachedName, entry] of _byName) {
-    if (entry.chain.includes(name)) out.push(cachedName);
-  }
-  return out;
-}
-
-/**
- * Invalidate the cache for a pack name AND every pack that extends it
- * (transitive — the codex C6 fix). When called with no argument,
- * invalidates everything.
- *
- * Called automatically by `withMutation` (Phase 2) after every
- * successful pack mutation; also exposed via `gbrain schema reload`.
- */
-export function invalidatePackCache(name?: string): { invalidated: string[] } {
-  if (name === undefined) {
-    const all = [..._byName.keys()];
-    _byName.clear();
-    return { invalidated: all };
-  }
-  const dependents = findDependents(name);
-  // The pack itself + all dependents.
-  const toEvict = Array.from(new Set([name, ...dependents]));
-  for (const n of toEvict) _byName.delete(n);
-  return { invalidated: toEvict };
-}
-
-/** Test-only access for assertions on the cache shape. */
-export function _cacheSizeForTests(): number {
-  return _byName.size;
-}
-
-/** Test-only access for assertions on which names are cached. */
-export function _cacheNamesForTests(): string[] {
-  return [..._byName.keys()];
-}
+# ---- (3) EOF APPEND — the merge machinery (LIFTED VERBATIM, relocated) ---
+cat >> "$REG" <<'VF_PATCH_EOF'
 
 // ───────────────────────────────────────────────────────────────────────
 // VF-FIX-SP-MERGE (#1749 + #1838) — full schema composition (child-wins)
-// over BOTH the extends chain AND borrow_from.
+// over BOTH the extends chain AND borrow_from. APPENDED as a pure end-of-file
+// block (anchor-splice form, C+B refactor). resolvePack above feeds the MERGED
+// manifest into buildAliasGraph/computeAliasClosureHash/the ResolvedPack
+// literal via `const merged = … mergeExtendsChain(…) : manifest`.
 //
 // SCOPE (see hermes MODIFICATIONS.md): the operator wants the schema to
 // EVOLVE along both axes — `extends: gbrain-base-v2` + own types (the
@@ -437,6 +207,62 @@ export function _cacheNamesForTests(): string[] {
 // Zod schema. Determinism: canonicalJSONStringify preserves ARRAY order,
 // so every union appends in fixed precedence order with in-place keyed
 // override (Map keeps first-insert position) → reproducible run to run.
+
+// VF-FIX-SP-MERGE (adversarial §5b): TWO independent budgets bound the
+// combined extends+borrow graph. (1) EXTENDS_DEPTH_HARD_CAP is the per-path
+// EXTENDS chain length (the existing public const) AND, applied separately, the
+// per-path BORROW recursion depth (kills the #1838 borrow→borrow ladder).
+// Borrow BREADTH is NOT extends depth — a pack borrowing many shallow siblings
+// must not blow the extends cap. (2) MERGE_TOTAL_RESOLUTIONS_CAP bounds the
+// TOTAL number of resolveComposed() frames for one top-level resolve, catching
+// a wide-and-deep graph that no single per-path cap would. Both throw
+// ExtendsChainTooDeepError (the wire-stable error class).
+export const MERGE_TOTAL_RESOLUTIONS_CAP = 64 as const;
+
+// VF-FIX-SP-MERGE: a borrow_from entry named a type/link_type that, after
+// fully resolving the borrowed pack (its own extends+borrow), is NOT present.
+// FAIL LOUD (adversarial §4): a silently-dropped borrowed type can leave a
+// dangling calibration_domains/mapping_rules reference that strict Zod does
+// NOT catch (those arrays carry bare string refs, no existence check), so a
+// silent drop would ship a structurally-broken pack. Throwing here turns the
+// dangling-ref into a build/load failure with a paste-ready hint instead.
+export class BorrowedTypeNotFoundError extends Error {
+  readonly borrower: string;
+  readonly borrowedPack: string;
+  readonly axis: 'types' | 'link_types';
+  readonly missing: string[];
+  constructor(borrower: string, borrowedPack: string, axis: 'types' | 'link_types', missing: string[]) {
+    super(
+      `pack "${borrower}" borrow_from {pack: ${borrowedPack}, ${axis}: [...]} ` +
+      `names ${axis} absent from the resolved "${borrowedPack}" pack: ${missing.join(', ')}. ` +
+      `Fix the borrow_from entry or the borrowed pack's declarations.`,
+    );
+    this.name = 'BorrowedTypeNotFoundError';
+    this.borrower = borrower;
+    this.borrowedPack = borrowedPack;
+    this.axis = axis;
+    this.missing = missing;
+  }
+}
+
+// VF-FIX-SP-MERGE: the merged manifest carries a dangling cross-reference
+// (calibration_domains[].page_types / mapping_rules[].to_type|link_type /
+// frontmatter_links[].page_type|link_type) that points at a type/link_type
+// NOT in the merged page_types/link_types. The strict Zod schema does NOT
+// enforce these (they are bare string[] / string fields — adversarial §3),
+// so without this guard a composition that drops/renames a referenced type
+// would Zod-pass and surface as a runtime aggregator/migration error. FAIL
+// LOUD at compose time over the MERGED manifest instead.
+export class DanglingReferenceError extends Error {
+  readonly pack: string;
+  readonly problems: string[];
+  constructor(pack: string, problems: string[]) {
+    super(`merged pack "${pack}" has dangling references: ${problems.join('; ')}`);
+    this.name = 'DanglingReferenceError';
+    this.pack = pack;
+    this.problems = problems;
+  }
+}
 
 const TAKES_KINDS_FLOOR = ['fact', 'take', 'bet', 'hunch'] as const;
 const UNKNOWN_RETYPE_SENTINEL = '*unknown*';
@@ -564,7 +390,7 @@ export function composeManifest(
   // schema carries only types/link_types, so it contributes nothing here.
   const frontmatter_links = mergeKeyed(
     rootToLeaf.map(m => m.frontmatter_links),
-    (fl: { page_type: string; link_type: string }) => `${fl.page_type} ${fl.link_type}`,
+    (fl: { page_type: string; link_type: string }) => `${fl.page_type} ${fl.link_type}`,
   );
   const enrichable_types = mergeKeyed(
     rootToLeaf.map(m => m.enrichable_types),
@@ -831,131 +657,66 @@ async function resolveComposed(
 }
 
 /**
- * Resolve + cache a manifest. Loads parent packs via the `loadByName`
- * dependency, tracks extends-chain depth, applies the E4 cap.
+ * VF-FIX-SP-MERGE entry point (anchor-splice form). Called from resolvePack
+ * ONLY when the leaf declares `extends` OR a non-empty `borrow_from` (the
+ * inline `const merged = … : manifest` guard). Threads a fresh shared
+ * visiting-set + the two budgets into resolveComposed. For a leaf that somehow
+ * reaches here with no real composition (defensive), resolveComposed →
+ * composeManifest returns the child BY REFERENCE, preserving the no-op.
  *
- * v0.40.6.0: cache is name-keyed and tracks file-stat snapshots so the
- * stat-TTL gate (inside `loadActivePack`) can detect cross-process
- * mutations without re-reading the bytes.
- *
- * `loadByPath` is the disk path resolver for each name in the extends
- * chain (used for the file-stat snapshot). Optional — when omitted, the
- * snapshot is empty and stat-TTL becomes a no-op for this entry (used
- * by tests that drive synthetic manifests with no disk backing).
+ * `deps` would let the caller extend the cache `chain` to borrowed packs too;
+ * the splice keeps the upstream cache-snapshot logic (extends chain) as-is and
+ * relies on the stat-TTL gate for freshness, so we discard `deps` here. (The
+ * full-file form recorded borrowed deps in the chain; under the splice we keep
+ * the upstream chain semantics to minimize surface area — borrowed-pack edits
+ * are still picked up within the stat-TTL window on the parent's own files.)
  */
-export async function resolvePack(
+export async function mergeExtendsChain(
   manifest: SchemaPackManifest,
   loadByName: (name: string) => Promise<SchemaPackManifest>,
-  opts: {
-    onDepthWarn?: (depth: number, chain: string[]) => void;
-    loadByPath?: (name: string) => string | null;
-  } = {},
-): Promise<ResolvedPack> {
-  const sha8 = await computeManifestSha8(manifest);
-  const id = packIdentity(manifest, sha8);
-
-  // Reference-equality fast path: if a previous resolvePack(manifest, ...)
-  // produced the SAME identity, return the cached resolved object. This
-  // preserves the v0.38 contract that two calls with the same manifest
-  // bytes return the same JS object reference.
-  //
-  // VF-FIX-SP-MERGE: the leaf-only identity key is SOUND ONLY for a
-  // standalone pack (extends:null AND no borrow_from), where leaf == merged.
-  // For a pack WITH an extends chain OR borrow_from, the leaf identity does
-  // not capture parent/borrowed-pack edits, so we must NOT short-circuit
-  // here — we fall through to re-resolve and let loadActivePack's stat-TTL
-  // gate (tryCachedPack) handle freshness. This removes the stale-dependency
-  // trap by construction without a resolved_sha8.
-  const isStandalone = manifest.extends == null && (manifest.borrow_from?.length ?? 0) === 0;
-  const existing = _byName.get(manifest.name);
-  if (isStandalone && existing && existing.resolved.identity === id) {
-    return existing.resolved;
-  }
-
-  // VF-FIX-SP-MERGE (#1749 + #1838) — full child-wins composition over BOTH
-  // the extends chain (root → leaf) AND borrow_from. resolveComposed threads
-  // a SINGLE shared visiting-set + depth budget across both axes (cycle/
-  // overflow guard) and resolves each borrowed pack RECURSIVELY to its full
-  // manifest before filtering to the borrow entry's types/link_types. `deps`
-  // collects every name that fed the merge (extends parents + borrowed packs,
-  // transitively) so the cache entry's `chain` lets invalidatePackCache(dep)
-  // cascade to this pack (codex C6 — now extended to borrowed deps too).
-  //
-  // Closure is computed over the MERGED manifest so a pack that
-  // `extends: gbrain-base-v2` inherits base-v2's full page_types + alias
-  // closure PLUS its additions, and `gbrain-everything` gets creator.atom +
-  // engineer.learning via borrow. For a standalone pack (extends:null AND
-  // no borrow) resolveComposed → composeManifest returns the child BY
-  // REFERENCE, so computeManifestSha8(merged) === computeManifestSha8(child)
-  // and the base/base-v2 no-op invariant holds byte-for-byte.
-  const deps = new Set<string>();
-  const merged = await resolveComposed(manifest, loadByName, {
+  opts: { onDepthWarn?: (depth: number, chain: string[]) => void } = {},
+): Promise<SchemaPackManifest> {
+  return resolveComposed(manifest, loadByName, {
     visiting: new Set<string>(),
     borrowDepth: 0,
     budget: { left: MERGE_TOTAL_RESOLUTIONS_CAP },
-    deps,
+    deps: new Set<string>(),
     onDepthWarn: opts.onDepthWarn,
   });
-  // Cache chain = self + every transitive dependency (extends + borrow).
-  const chain: string[] = [manifest.name, ...deps];
-  const alias_graph = buildAliasGraph(merged);
-  const alias_closure_hash = await computeAliasClosureHash(merged);
-
-  const resolved: ResolvedPack = {
-    manifest: merged,    // ← consumed field carries the merged taxonomy
-    identity: id,        // ← leaf-only, wire-stable (computed from child)
-    manifest_sha8: sha8, // ← leaf-only
-    alias_closure_hash,
-    alias_graph,
-  };
-
-  // Capture file-stat snapshot for the stat-TTL gate. Skip names that
-  // the locator can't resolve (synthetic manifests in tests).
-  const files: Array<{ name: string; path: string; mtimeMs: number }> = [];
-  if (opts.loadByPath) {
-    for (const n of chain) {
-      const path = opts.loadByPath(n);
-      if (path === null) continue;
-      files.push({ name: n, path, mtimeMs: safeMtimeMs(path) });
-    }
-  }
-
-  _byName.set(manifest.name, {
-    resolved,
-    chain: [...chain],
-    files,
-    lastStatMs: Date.now(),
-  });
-  return resolved;
-}
-
-/**
- * Try to return a cached resolved pack for `name` without re-reading the
- * manifest from disk. Returns null on cache miss OR when the stat-TTL
- * gate detects a file change (which triggers eviction + cascade).
- *
- * The TTL gate keeps the hot path cheap: most calls inside the 1-second
- * window return immediately (~10ns) without statting. Outside the
- * window: one statSync per file in the extends chain (~50µs per file).
- * Worst-case latency for a daemon picking up an operator's mutation:
- * 1 second.
- */
-export function tryCachedPack(name: string): ResolvedPack | null {
-  const entry = _byName.get(name);
-  if (!entry) return null;
-  const ttl = resolveStatTtlMs();
-  const ageMs = Date.now() - entry.lastStatMs;
-  if (ageMs < ttl) return entry.resolved;
-  // TTL expired: stat all files. If any changed, cascade-invalidate.
-  if (!snapshotMatches(entry.files)) {
-    invalidatePackCache(name);
-    return null;
-  }
-  // Snapshot still fresh: refresh lastStatMs so the next hot-path return
-  // is cheap again.
-  _byName.set(name, { ...entry, lastStatMs: Date.now() });
-  return entry.resolved;
 }
 VF_PATCH_EOF
+
 grep -qF 'VF-FIX-SP-MERGE' "$REG" || { echo "[sp-merge] ERROR: marker absent post-write." >&2; exit 1; }
-echo "[sp-merge] ✓ patch applied (registry.ts extends-merge)."
+echo "[sp-merge] ✓ patch applied (registry.ts extends-merge anchor-splice)."
+
+# ---- post-write type check (project tsc --noEmit) -----------------------
+# Run the project's own `tsc --noEmit` (honors the repo tsconfig — which
+# enables allowImportingTsExtensions etc.) so registry.ts is type-checked in
+# context. We invoke node on typescript's own tsc.js (the node_modules/.bin/tsc
+# shim is sometimes a broken stub in a global-install layout). Non-fatal: if
+# the toolchain is absent we skip with a WARN — the `gbrain --version` smoke
+# gate in the Dockerfile RUN line is the load-bearing post-check (a real type
+# error there aborts module load and fails the build).
+PKG_ROOT="$(cd "$GBRAIN_SRC/.." && pwd)"
+TSC_JS=""
+for cand in \
+  "$PKG_ROOT/node_modules/typescript/lib/tsc.js" \
+  "$GBRAIN_SRC/../../typescript/lib/tsc.js"; do
+  [ -f "$cand" ] && { TSC_JS="$cand"; break; }
+done
+if [ -n "$TSC_JS" ] && [ -f "$PKG_ROOT/tsconfig.json" ]; then
+  echo "[sp-merge] tsc --noEmit (project) ..."
+  if ( cd "$PKG_ROOT" && node "$TSC_JS" --noEmit >/tmp/sp-merge-tsc.log 2>&1 ); then
+    echo "[sp-merge] ✓ tsc --noEmit clean (whole project, registry.ts included)."
+  else
+    REG_ERRS="$(grep -c 'core/schema-pack/registry.ts' /tmp/sp-merge-tsc.log || true)"
+    if [ "${REG_ERRS:-0}" != "0" ]; then
+      echo "[sp-merge] ERROR: tsc reported $REG_ERRS error(s) IN registry.ts (see /tmp/sp-merge-tsc.log)." >&2
+      grep 'core/schema-pack/registry.ts' /tmp/sp-merge-tsc.log >&2 || true
+      exit 1
+    fi
+    echo "[sp-merge] WARN: tsc reported pre-existing project errors OUTSIDE registry.ts (none in registry.ts). Proceeding — the gbrain --version smoke gate is authoritative."
+  fi
+else
+  echo "[sp-merge] (tsc/tsconfig not available — relying on the gbrain --version smoke gate)."
+fi

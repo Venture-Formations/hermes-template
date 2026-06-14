@@ -237,30 +237,31 @@ RUN bash /app/patches/gbrain-propose-takes-disable.sh && \
 RUN bash /app/patches/gbrain-takes-grade-sort-asc.sh && \
     gbrain --version
 
-# --- VF gbrain CORE patches: schema-pack evolving-schema fixes --------------
-# Three independent upstream bugs (#1749 / #1750 / #1574+#1726) that together make
-# a custom pack `extends: gbrain-base-v2` collapse to its own types / fail to load.
-# ORDER: merge → yaml → ssot (the ssot reroute of `schema show/use <name>` through
-# the resolver returns inherited taxonomy only once the merge patch is present;
-# they apply independently — no shared anchor). Each is idempotent + self-auditing:
-# EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving) on anchor/
-# checksum drift. See patches/gbrain-schema-pack-*.meta.yml.
+# --- VF gbrain CORE patch: schema-pack extends/borrow merge (C+B) -----------
+# ONE patch (the "C+B" audit outcome): fix #1749 — resolvePack built the
+# ResolvedPack from the BARE CHILD, so a custom pack `extends: gbrain-base-v2`
+# collapsed to its own types and the bundled lens meta-packs never composed
+# borrow_from (#1838). The inheritance engine lives ENTIRELY in resolvePack,
+# and the CONFIG-ACTIVATION path (DB/tier `cfg.schema_pack` → defaultPackLocator
+# → resolvePack) exercises the merge IDENTICALLY to `schema use`. So feeding the
+# MERGED manifest into resolvePack's consumers is the only change gbrain needs.
 #
-# #1749 — resolvePack built ResolvedPack from the BARE CHILD (never merged the
-# extends chain / borrow_from). FULL-FILE REPLACEMENT of registry.ts, guarded by a
-# pre-clobber content-checksum gate pinned to GBRAIN_REF=4ee530f.
+# The two former companion patches were DROPPED under C+B (proven unnecessary
+# for the config-activation path — see UPGRADING_GBRAIN.md "C+B refactor"):
+#   • #1750 (loader.ts js-yaml block-scalar) — accepted DX loss: custom packs
+#     must use a SINGLE-LINE `description:` (no `|` block).
+#   • #1574/#1726 (bundled-SSOT for `schema use/list`) — accepted DX loss:
+#     activate a custom/lens pack via `gbrain config set schema_pack <name>`,
+#     NOT `schema use` (which prints "Unknown pack" for non-{base,recommended}
+#     names); `schema list` shows 2 not 7. Resolution is unaffected.
+#
+# This patch is an ANCHOR-SPLICE of registry.ts (not a full-file replace):
+# anchored on the self-documenting "v0.41+ T20 follow-up" comment + a
+# match-count assertion (each of the 3 substitutions must apply exactly once),
+# so it can NEVER silently no-op. Idempotent + self-auditing: EXITS NON-ZERO
+# and FAILS THE BUILD (old container keeps serving) on anchor drift / a
+# zero-or-multi match. See patches/gbrain-schema-pack-resolve-merge.meta.yml.
 RUN bash /app/patches/gbrain-schema-pack-resolve-merge.sh && \
-    gbrain --version
-# #1750 — parseYamlMini silently drops every key after a block scalar
-# (`description: |`). FULL-FILE REPLACEMENT of loader.ts (checksum-guarded) →
-# parseYamlMini delegates to js-yaml safeLoad (already a dep).
-RUN bash /app/patches/gbrain-schema-pack-yaml-blockscalar.sh && \
-    gbrain --version
-# #1574/#1726 — bundled-pack registries disagree → `schema use/show <bundled>` =
-# "Unknown pack", `schema list` shows 2. New bundled.ts SSOT + FULL-FILE
-# REPLACEMENT of commands/schema.ts (checksum-guarded): runList → SSOT; routes
-# named show/use through loadActivePack({perCall}).
-RUN bash /app/patches/gbrain-schema-pack-bundled-ssot.sh && \
     gbrain --version
 
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
