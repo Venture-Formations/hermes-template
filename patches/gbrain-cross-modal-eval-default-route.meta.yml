@@ -1,0 +1,53 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-cross-modal-eval-default-route
+title: "Re-route the 3 `gbrain eval cross-modal` default slots to distinct anthropic ids so a default run is rerouted entirely to grok ($0 via FIX-NA-1) instead of billing the native OpenAI/Google keys (FIX-CME-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-cross-modal-eval-default-route.sh
+source_sha: "6149205666f7867e23d0f6f6a3b8c3550f9f166e2faeb961fdca0e0d70bea16a"
+# anchor: the load-bearing native-default DEFAULT_SLOTS line the patch replaces
+# (the slot-A openai default); the patch ALSO splices the slot-C google default
+# `{ id: 'C', model: 'google:gemini-1.5-pro' },` and the slot-B line. Each is
+# checked present EXACTLY ONCE at build time. If gbrain changes the cross-modal
+# defaults the patch FAILS THE BUILD (old container keeps serving), forcing a
+# re-point — never a silent no-op.
+anchor: "{ id: 'A', model: 'openai:gpt-4o' },"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/core/cross-modal-eval/runner.ts DEFAULT_SLOTS defaults all 3 cross-modal eval slots to DISTINCT `anthropic:` ids (A=anthropic:claude-opus-4-7, B=anthropic:claude-sonnet-4-6, C=anthropic:claude-haiku-4-5), NOT the vanilla native ids (A=openai:gpt-4o, C=google:gemini-1.5-pro). All 3 reroute to grok:grok-4.3 via the FIX-NA-1 chokepoint (model-resolver.ts), so a default `gbrain eval cross-modal` run spends $0 and makes NO native OpenAI/Google call. NO native openai:/google: id remains as a DEFAULT_SLOTS model or a HELP override-default line. The explicit --slot-a-model/--slot-b-model/--slot-c-model overrides (out.slot{A,B,C}Model + `parsed.slotXModel ?? DEFAULT_SLOTS[i].model`) are UNCHANGED so an operator can still opt into native multi-provider diversity + native billing."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-cross-modal-eval-default-route.probe.sh
+target_files:
+  - "gbrain src/core/cross-modal-eval/runner.ts (DEFAULT_SLOTS, ~L46-49: the 3 default slot model ids)"   # DOC ONLY — upstream gbrain file
+  - "gbrain src/commands/eval-cross-modal.ts (HELP override-default one-liners for --slot-a-model/--slot-c-model, ~L79/L81)"   # DOC ONLY — upstream gbrain file
+why: >
+  `gbrain eval cross-modal` (src/commands/eval-cross-modal.ts) scores an OUTPUT
+  with THREE different-provider frontier models (slots A/B/C). The default slot
+  model ids live in DEFAULT_SLOTS (src/core/cross-modal-eval/runner.ts) and the
+  command reads them via `parsed.slotXModel ?? DEFAULT_SLOTS[i].model`. Vanilla
+  defaults are A=openai:gpt-4o, B=anthropic:claude-opus-4-7, C=google:gemini-1.5-pro.
+  Only slot B (`anthropic:`) is rerouted to grok ($0) by the FIX-NA-1 chokepoint
+  (model-resolver.ts: a native `anthropic:` id with no ANTHROPIC_API_KEY ->
+  live default -> grok:grok-4.3). slot A bills the native OPENAI_API_KEY and slot
+  C bills the native Google key — a violation of the no-native-billing invariant.
+  The command is NOT cron-wired (operator-only), so the leak only fires on a
+  manual `gbrain eval cross-modal` run, but the operator wants the DEFAULT made
+  billing-safe (mirrors the eval-takes-quality decision). This patch re-points
+  the 3 DEFAULT_SLOTS ids to DISTINCT anthropic ids (A=anthropic:claude-opus-4-7,
+  B=anthropic:claude-sonnet-4-6, C=anthropic:claude-haiku-4-5) so a default run
+  reroutes entirely to grok ($0). Distinct ids preserve the 3-slot structure.
+  The explicit --slot-a-model/--slot-b-model/--slot-c-model overrides are LEFT
+  UNCHANGED so an operator can still deliberately opt into native multi-provider
+  diversity (and native billing) by passing them. The 3 HELP one-liners that
+  documented the old native defaults are updated to match (cosmetic). NOT filed
+  upstream (operator decision 2026-06-15) — VF-only fork patch tied to our
+  no-native-Anthropic/no-native-billing posture.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain makes the `gbrain eval cross-modal` DEFAULT_SLOTS provider-agnostic / drops the native openai:gpt-4o + google:gemini-1.5-pro defaults (e.g. routes defaults through a single configurable model knob), so a default run no longer bills a native OpenAI/Google key. The still_needed_probe checks the DEFAULT_SLOTS native-id presence every upgrade. NOT filed upstream — VF-only fork patch."
+added: "2026-06-15"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain

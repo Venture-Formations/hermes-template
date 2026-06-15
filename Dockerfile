@@ -322,6 +322,20 @@ RUN bash /app/patches/gbrain-schema-pack-resolve-merge.sh && \
 RUN bash /app/patches/gbrain-atom-drain-progress-guard.sh && \
     gbrain --version
 
+# --- gbrain core patch: cross-modal eval default route (FIX-CME-1) ----------
+# `gbrain eval cross-modal` defaults its 3 scoring slots to native providers
+# (A=openai:gpt-4o, B=anthropic:claude-opus-4-7, C=google:gemini-1.5-pro); only
+# slot B reroutes to grok ($0) via FIX-NA-1, so a DEFAULT run bills the native
+# OPENAI_API_KEY (slot A) + Google key (slot C). The command is operator-only
+# (not cron-wired), but the default must be billing-safe. This re-points all 3
+# DEFAULT_SLOTS ids to DISTINCT anthropic ids (all reroute to grok via FIX-NA-1,
+# $0) while leaving the --slot-a/b/c-model overrides intact for deliberate native
+# diversity. Idempotent + self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old
+# container keeps serving) on anchor drift. See
+# patches/gbrain-cross-modal-eval-default-route.meta.yml.
+RUN bash /app/patches/gbrain-cross-modal-eval-default-route.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-
