@@ -308,6 +308,20 @@ RUN bash /app/patches/gbrain-takes-grade-sort-asc.sh && \
 RUN bash /app/patches/gbrain-schema-pack-resolve-merge.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: extract_atoms drain no-progress guard (FIX-AD-1) --
+# runExtractAtomsDrain's per-batch break is gated on
+# `r.extracted === 0 && r.skipped === 0`, but session_corpus_dir re-discovers
+# transcript duplicates so r.skipped is ~always > 0 → the break NEVER fires and a
+# 0-atom no-transcript page spins ~20 empty Haiku batches per run until the
+# wallclock window times out (pure LLM waste; atom output is otherwise healthy).
+# This re-bases the break on REAL forward progress (extracted===0 AND the
+# remaining backlog did not drop vs the prior iteration), reusing the loop's
+# existing `const before = await deps.countRemaining()` read. Idempotent +
+# self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving)
+# on anchor drift. See patches/gbrain-atom-drain-progress-guard.meta.yml.
+RUN bash /app/patches/gbrain-atom-drain-progress-guard.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

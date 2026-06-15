@@ -1,0 +1,51 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-atom-drain-progress-guard
+title: "Re-base the extract_atoms drain no-progress break on real forward progress so re-discovered duplicates stop spinning empty Haiku batches (FIX-AD-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-atom-drain-progress-guard.sh
+source_sha: "55f1e0158fe8883e63692bd73b270d001344258169176f36bfb77b856dfcb6f2"
+# anchor: the exact no-progress break line the patch replaces; checked present
+# EXACTLY ONCE in the PATCH BODY. If gbrain changes the drain break the patch
+# FAILS THE BUILD (old container keeps serving), forcing a re-point — never a
+# silent no-op.
+anchor: "if (r.extracted === 0 && r.skipped === 0) { stopped = 'no_progress'; break; }"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/core/cycle/extract-atoms-drain.ts breaks the drain loop on NO FORWARD PROGRESS (extracted===0 AND remaining did not drop vs the prior iteration), NOT on the original `r.extracted === 0 && r.skipped === 0` (which never fires because session_corpus_dir re-discovers transcript duplicates → r.skipped>0). A 0-atom no-transcript page must trigger an early `stopped: 'no_progress'` break instead of spinning empty LLM batches until the wallclock window times out, while any extracted>0 / dropping-remaining batch still proceeds."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-atom-drain-progress-guard.probe.sh
+target_files:
+  - "gbrain src/core/cycle/extract-atoms-drain.ts (runExtractAtomsDrain loop break ~L93; skipped-gate → no-forward-progress)"   # DOC ONLY — upstream gbrain file
+why: >
+  runExtractAtomsDrain (src/core/cycle/extract-atoms-drain.ts) is the bounded
+  single-hold drain behind `gbrain dream --phase extract_atoms --drain`, the
+  `extract-atoms-drain` Minion handler, and the autopilot auto-drain. Its
+  per-batch "no forward progress" break is gated on
+  `r.extracted === 0 && r.skipped === 0`, but that NEVER fires on this brain:
+  session_corpus_dir (/data/brain/sources) keeps re-discovering transcript
+  duplicates, so every batch returns duplicates_skipped > 0 (r.skipped > 0). A
+  no-transcript page that clears the 500-char floor but yields 0 atoms therefore
+  spins ~20 empty Haiku batches per run until the wallclock window times out —
+  burning LLM budget for zero output. Confirmed on this brain (2026-06-15): 13
+  no-transcript pages, with the 754-char sources/youtube/mm3ybi-9ccw currently
+  stuck. Atoms are otherwise healthy (~2516, produced by the gbrain-atom-drain
+  cron); this is pure waste, not an atom-correctness bug. This patch re-bases the
+  break on REAL progress: the loop already reads `const before = await
+  deps.countRemaining()` at the top of each iteration; we add an after-batch
+  countRemaining() and break when the batch extracted 0 NEW atoms AND the
+  remaining backlog did not drop (after >= before) — exactly the spin condition,
+  regardless of how many duplicates were skipped. Fail open: if either count is
+  null (query error) the loop keeps going (the window cap still bounds it); any
+  extracted>0 or a dropping `remaining` keeps draining. window/maxBatches caps and
+  the `stopped: 'no_progress'` value are unchanged. NOT filed upstream (operator
+  decision 2026-06-15) — VF-only fork patch; pairs with the gbrain-atom-drain cron.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain bases the extract_atoms drain no-progress break on real forward progress upstream (drops the `&& r.skipped === 0` gate / compares remaining counts), so re-discovered duplicates no longer keep the break from firing. The still_needed_probe checks the break shape every upgrade. NOT filed upstream — VF-only fork patch."
+added: "2026-06-15"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain
