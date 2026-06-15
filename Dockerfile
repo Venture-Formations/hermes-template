@@ -45,8 +45,8 @@ RUN apt-get update && \
 # HERMES_REF branch. Docker keys the clone layer on the RUN text + ARG values, so
 # a push to the fork branch tip (HERMES_REF unchanged) would otherwise reuse the
 # CACHED clone = stale fork code. Bump this when the fork branch tip changes
-# without a HERMES_REF rename. (Bumped to 2 for VF-FAIL-CLOSED-1, fork @21308e9c9.)
-ARG HERMES_FORK_REV=2
+# without a HERMES_REF rename. (Bumped to 3 for VF-FAIL-CLOSED-1 early guard, fork @cbe090e52.)
+ARG HERMES_FORK_REV=3
 RUN echo "hermes-agent fork rev ${HERMES_FORK_REV} (HERMES_REF=${HERMES_REF})" && \
     git clone --depth 1 --branch ${HERMES_REF} https://github.com/${HERMES_REPO}.git /opt/hermes-agent && \
     cd /opt/hermes-agent && \
