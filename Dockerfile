@@ -239,6 +239,19 @@ RUN bash /app/patches/gbrain-takes-notable-claims.sh && \
 RUN bash /app/patches/gbrain-takes-classifier-quality.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-takes-extract-frontier (FIX-TKF-1) ---------
+# extractTakesFromPages selected eligible pages with NO already-has-takes filter,
+# so every run re-LLMs the same top-N pages (write-idempotent via FIX-TK-2 fence
+# dedup, but NOT cost-idempotent → re-burns the shared xAI grok proxy). Adds
+# `AND NOT EXISTS (... takes ...)` so a run only classifies zero-take pages —
+# the prerequisite that makes the gbrain-takes-drain cron safe (drains the
+# post-06-08 backlog + forward inflow at ~$0 steady state). Edits the QUERY, not
+# the prompt or FIX-TK-2's splice — ordered after FIX-TK-2 + FIX-TQC-1 (same file,
+# non-overlapping anchors). Idempotent + self-auditing: FAILS THE BUILD (old
+# container keeps serving) on anchor drift. See gbrain-takes-extract-frontier.meta.yml.
+RUN bash /app/patches/gbrain-takes-extract-frontier.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch: gbrain-loud-llm-failures (FIX-LF-1) --------------
 # Make silently-swallowed LLM/gateway failures LOUD in facts extraction — the
 # audit's silent-zero "Face 2" (a chat-unavailable / swallowed chat() throw

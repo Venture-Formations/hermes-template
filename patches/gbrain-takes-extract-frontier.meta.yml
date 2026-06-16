@@ -1,0 +1,34 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+id: gbrain-takes-extract-frontier
+title: "extractTakesFromPages frontier selector: skip pages that already have takes so re-runs are cost-idempotent (enables the gbrain-takes-drain cron) (FIX-TKF-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-takes-extract-frontier.sh
+source_sha: "1f86d8d979159942e726a92e629463f9970216be5e0050db97bff4617da43c28"
+anchor: "        AND length(COALESCE(compiled_truth, '')) > 200"
+invariant: "src/core/extract-takes-from-pages.ts eligible-pages query carries `AND NOT EXISTS (SELECT 1 FROM takes tk WHERE tk.page_id = pages.id)` so extractTakesFromPages only LLM-classifies pages with ZERO takes. Every caller (onboard bootstrap, `gbrain takes extract --from-pages` CLI, the gbrain-takes-drain cron) is cost-idempotent: a re-run skips already-extracted pages and only spends on net-new pages. No-op for the onboard takesCount===0 path."
+still_needed_probe: patches/gbrain-takes-extract-frontier.probe.sh
+target_files:
+  - "gbrain src/core/extract-takes-from-pages.ts (eligible-pages SELECT, ~L136-143)"   # DOC ONLY — upstream gbrain file
+why: >
+  extractTakesFromPages (the producer FIX-TK-2 hooks to fence-project takes) selects
+  eligible pages with NO already-has-takes filter (WHERE type IN (...) AND deleted_at
+  IS NULL AND length(compiled_truth)>200 ORDER BY updated_at DESC LIMIT maxPages), so
+  every run re-LLMs the same top-N recently-updated pages. The FIX-TK-2 fence
+  claim-dedup makes a re-run WRITE-idempotent but NOT COST-idempotent — each
+  re-scanned page is a fresh classifier call on the shared xAI-OAuth grok proxy. That
+  is the #1 blocker to a recurring takes-drain cron (the analog of gbrain-atom-drain):
+  without a frontier filter the cron would re-LLM the whole corpus every run and
+  throttle the proxy. This adds `AND NOT EXISTS (... takes ...)` so a run only touches
+  zero-take pages — draining the post-2026-06-08 backlog over successive runs and
+  handling forward inflow at ~0 steady-state cost. One-line WHERE addition; no
+  signature/param change. Root-caused by the takes-producer-starvation workflow
+  (2026-06-16): the 5131 source-fence takes were a one-shot 06-08 backfill with no
+  recurring trigger; this patch + the gbrain-takes-drain cron is the durable producer.
+reapply: docker-build
+deprecate_when: "garrytan/gbrain adds an already-has-takes / updated_at-cursor frontier to extractTakesFromPages (the still_needed_probe checks for the NOT EXISTS / cursor). NOT filed upstream (operator decision 2026-06-16) — VF fork patch."
+added: "2026-06-16"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain
