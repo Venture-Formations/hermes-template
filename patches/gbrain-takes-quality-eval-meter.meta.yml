@@ -1,0 +1,33 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+id: gbrain-takes-quality-eval-meter
+title: "Fix the takes-quality eval METER: default panel -> 3 anthropic ids (no INCONCLUSIVE / no native billing) + eval sampler filters WHERE active (FIX-TQM-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-takes-quality-eval-meter.sh
+source_sha: "6e469c0ae63b7489a91816524f8655f05df72173d9077c037bf66c8d7f5f66f1"
+anchor: "  'openai:gpt-4o',\n  'anthropic:claude-opus-4-7',\n  'google:gemini-1.5-pro',"
+invariant: "src/core/takes-quality-eval/runner.ts: DEFAULT_MODEL_PANEL is 3 DISTINCT anthropic ids (all reroute to grok via FIX-NA-1, $0, >=2 successes so a bare `gbrain eval takes-quality run` returns PASS/FAIL not INCONCLUSIVE and bills no native OpenAI/Google key); AND the eval sampler (sampleTakesAsText) filters `WHERE t.active` in BOTH the slugPrefix branch (AND t.active) and the default branch (WHERE t.active), so struck/superseded takes are not scored (matches every other take reader)."
+still_needed_probe: patches/gbrain-takes-quality-eval-meter.probe.sh
+target_files:
+  - "gbrain src/core/takes-quality-eval/runner.ts (DEFAULT_MODEL_PANEL ~L36-40; sampleTakesAsText query ~L81/L94)"   # DOC ONLY — upstream gbrain file
+why: >
+  Two meter defects verified in runner.ts. (P2) DEFAULT_MODEL_PANEL defaults to
+  [openai:gpt-4o, anthropic:claude-opus-4-7, google:gemini-1.5-pro]; on this
+  deployment only the anthropic id reroutes to grok ($0) via FIX-NA-1, so a bare
+  `gbrain eval takes-quality run` gets <2 successful models -> verdict
+  INCONCLUSIVE, and a default run would bill the native OPENAI_API_KEY + Google
+  key (FIX-CME-1-class native-billing leak). (P1) the eval sample query has NO
+  `active` filter in either branch, so it scores struck (active=false)/superseded
+  rows that every other reader (searchTakes, vector recall, rollups) excludes — a
+  latent correctness bug and the substrate that makes the SAFE reversible
+  supersede/soft-strike cleanup path actually drop a take from the eval sample.
+  Repoint the default panel to 3 distinct anthropic ids and add the active filter
+  to both branches. Pure read-path/config; zero brain mutation. Validated live
+  2026-06-16: bare run goes INCONCLUSIVE -> FAIL 6.3 with 3/3 anthropic models.
+reapply: docker-build
+deprecate_when: "garrytan/gbrain makes the takes-quality DEFAULT_MODEL_PANEL provider-agnostic/billing-safe AND adds a `WHERE active` filter to the eval sampler (every sibling take reader already filters active). The still_needed_probe checks both each upgrade. NOT filed upstream (operator decision 2026-06-16) — VF fork patch."
+added: "2026-06-16"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain

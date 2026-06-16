@@ -227,6 +227,18 @@ RUN bash /app/patches/gbrain-timeline-writer-fixes.sh && \
 RUN bash /app/patches/gbrain-takes-notable-claims.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-takes-classifier-quality (FIX-TQC-1) -------
+# CLASSIFIER_SYSTEM (the LLM take-extraction prompt, extract-takes-from-pages.ts)
+# lacked kind-conservatism, weight-magnitude guidance, and named-trivia exclusion
+# (the 3 dims the takes-quality rubric penalizes). Folds the judge's guidance into
+# the prompt. ORDERED AFTER FIX-TK-2 (same file; FIX-TK-2 consumes the batch flush
+# / ALLOWED_PAGE_TYPES / loop, NOT the prompt literal — anchors do not overlap).
+# Governs only the ~11% LLM-extracted path (ALLOWED_PAGE_TYPES); the 99% fence
+# path (FIX-TK-2) is unaffected. Idempotent + self-auditing: FAILS THE BUILD (old
+# container keeps serving) on anchor drift. See gbrain-takes-classifier-quality.meta.yml.
+RUN bash /app/patches/gbrain-takes-classifier-quality.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch: gbrain-loud-llm-failures (FIX-LF-1) --------------
 # Make silently-swallowed LLM/gateway failures LOUD in facts extraction — the
 # audit's silent-zero "Face 2" (a chat-unavailable / swallowed chat() throw
@@ -350,6 +362,19 @@ RUN bash /app/patches/gbrain-cross-modal-eval-default-route.sh && \
 # container keeps serving) on anchor drift. See
 # patches/gbrain-eval-takes-quality-gateway-env.meta.yml.
 RUN bash /app/patches/gbrain-eval-takes-quality-gateway-env.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-takes-quality-eval-meter (FIX-TQM-1) -------
+# The takes-quality eval METER was broken: (P2) DEFAULT_MODEL_PANEL defaulted to
+# openai:gpt-4o + anthropic + google:gemini-1.5-pro, so a bare run got <2 grok
+# successes -> INCONCLUSIVE and billed native OpenAI/Google keys; (P1) the eval
+# sampler had no `WHERE active` filter so it scored struck/superseded rows every
+# other reader excludes. Repoints the default panel to 3 anthropic ids (all grok,
+# $0, real PASS/FAIL) and adds the active filter to both sampler branches. Pure
+# read-path/config; zero brain mutation. Validated live (bare run INCONCLUSIVE ->
+# FAIL 6.3, 3/3 models). Idempotent + self-auditing: FAILS THE BUILD on anchor
+# drift. See gbrain-takes-quality-eval-meter.meta.yml.
+RUN bash /app/patches/gbrain-takes-quality-eval-meter.sh && \
     gbrain --version
 
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------

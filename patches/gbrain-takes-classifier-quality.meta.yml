@@ -1,0 +1,32 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+id: gbrain-takes-classifier-quality
+title: "Improve CLASSIFIER_SYSTEM take-extraction prompt: kind-conservatism + 0.05-grid weight caps + named-trivia exclusion (FIX-TQC-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-takes-classifier-quality.sh
+source_sha: "fb987719c75f0cf3a438f38cc7d2e7afa9fc796c7412c7ebca9de91b89dbb779"
+anchor: "Kind taxonomy:\n  - fact: verifiable as true/false (e.g. \"X raised $5M in Mar 2024\")"
+invariant: "src/core/extract-takes-from-pages.ts CLASSIFIER_SYSTEM carries (a) a CONSERVATIVE kind taxonomy (when torn between fact and anything else, never pick fact; contested stats/self-reports/superlatives are NOT facts; predictions->bet), (b) explicit 0.05-grid weight rules (fact 0.8 max unless quoted; self-reports 0.55; take 0.5-0.7; bet 0.4-0.6; hunch 0.3-0.5), and (c) an expanded Skip list naming the rubric trivia (handles, follower/repo/star counts, team rosters, restated bio/founded-year, URLs, generic praise)."
+still_needed_probe: patches/gbrain-takes-classifier-quality.probe.sh
+target_files:
+  - "gbrain src/core/extract-takes-from-pages.ts (CLASSIFIER_SYSTEM template literal, ~L24-38)"   # DOC ONLY — upstream gbrain file
+why: >
+  The takes-quality rubric (rubric.ts) penalizes kind_classification (no
+  conservatism tiebreak; a fact example that invites opinions to be kinded fact),
+  weight_calibration (CLASSIFIER_SYSTEM gives NO weight-magnitude guidance ->
+  over-confident facts), and signal_density (the Skip line names none of the
+  rubric trivia). This patch folds the judge's own guidance into the prompt. SCOPE
+  (verified): CLASSIFIER_SYSTEM only runs on ALLOWED_PAGE_TYPES (concept/atom/lore/
+  briefing/writing/originals) ~= 11% of the corpus (~53/5185 takes); the other 99%
+  are fence-projected via FIX-TK-2 onto company/person pages and are NOT governed
+  by this prompt. So this improves the LLM-extracted path's FUTURE takes only — it
+  is NOT a corpus-wide score-mover (the dominant attribution defect, holder=system,
+  is FIX-TK-2 route.ts resolveSpeaker, handled separately). Ordered AFTER FIX-TK-2
+  (which edits the same file but not the prompt literal — anchors do not overlap).
+reapply: docker-build
+deprecate_when: "garrytan/gbrain ships kind-conservatism + weight-magnitude guidance + a named-trivia Skip list in CLASSIFIER_SYSTEM (the still_needed_probe checks the vanilla prompt for these). NOT filed upstream (operator decision 2026-06-16) — VF fork patch."
+added: "2026-06-16"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain
