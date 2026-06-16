@@ -336,6 +336,22 @@ RUN bash /app/patches/gbrain-atom-drain-progress-guard.sh && \
 RUN bash /app/patches/gbrain-cross-modal-eval-default-route.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-eval-takes-quality-gateway-env (FIX-TQ-1) --
+# `gbrain eval takes-quality run` (our weekly gbrain-eval-takes-quality-weekly
+# cron) self-configures the gateway with `configureGateway({ ...cfg,
+# ...(process.env) } as any)` — spreading process.env as TOP-LEVEL keys, which
+# leaves the REQUIRED AIGatewayConfig.env field undefined (the `as any` hid the
+# type error). Every model call then throws `undefined is not an object
+# (evaluating 'env[k]')` in defaultResolveAuth → 0/3 slots score → verdict
+# INCONCLUSIVE → exit 2 → the weekly cron fails EVERY run and take-quality is
+# never measured. This nests env under the `env:` key (mirrors the working
+# eval-cross-modal.ts pattern). A vanilla gbrain bug (filed upstream), not VF-
+# specific. Idempotent + self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old
+# container keeps serving) on anchor drift. See
+# patches/gbrain-eval-takes-quality-gateway-env.meta.yml.
+RUN bash /app/patches/gbrain-eval-takes-quality-gateway-env.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

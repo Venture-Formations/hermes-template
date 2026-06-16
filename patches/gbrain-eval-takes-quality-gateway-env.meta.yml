@@ -1,0 +1,50 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-eval-takes-quality-gateway-env
+title: "Fix `gbrain eval takes-quality` gateway config: nest env under `env:` so the weekly eval can reach a verdict instead of crashing INCONCLUSIVE on `env[k]` (FIX-TQ-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-eval-takes-quality-gateway-env.sh
+source_sha: "1f3c15cc5a639f1e7c1a5d83d21f6a51a44b0d71878fdec3c0f7b10436ed75f4"
+# anchor: the one buggy configureGateway call the patch replaces. Spreads
+# process.env as TOP-LEVEL keys (leaving the required AIGatewayConfig.env field
+# undefined). Checked present EXACTLY ONCE at build time; if gbrain changes the
+# call the patch FAILS THE BUILD (old container keeps serving), forcing a
+# re-point — never a silent no-op.
+anchor: "configureGateway({ ...cfg, ...(process.env as Record<string, string>) } as any);"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/commands/eval-takes-quality.ts passes a DEFINED env map to configureGateway via the nested `env: { ...process.env }` key (NOT `...process.env` spread as top-level keys). So _config.env is populated and defaultResolveAuth (src/core/ai/gateway.ts) never evaluates `env[k]` on undefined. A `gbrain eval takes-quality run` reaches a real verdict (pass/fail) instead of INCONCLUSIVE with per-slot `provider_error: undefined is not an object (evaluating 'env[k]')`."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-eval-takes-quality-gateway-env.probe.sh
+target_files:
+  - "gbrain src/commands/eval-takes-quality.ts (runEvalTakesQuality, the configureGateway self-config call, ~L131)"   # DOC ONLY — upstream gbrain file
+why: >
+  `gbrain eval takes-quality run` (wired as our weekly `gbrain-eval-takes-quality-weekly`
+  no_agent cron) self-configures the AI gateway with
+  `configureGateway({ ...cfg, ...(process.env as Record<string, string>) } as any)`.
+  That spreads process.env as TOP-LEVEL keys, so the REQUIRED AIGatewayConfig.env
+  field (src/core/ai/types.ts) is left undefined and the `as any` cast hides the
+  type error. configureGateway then sets `_config.env = config.env` (undefined),
+  and the first model call hits defaultResolveAuth(recipe, cfg.env=undefined, ...)
+  which evaluates `env[k]` on undefined and throws
+  `provider_error: undefined is not an object (evaluating 'env[k]')` for EVERY
+  model in the panel → 0 of 3 slots score → verdict INCONCLUSIVE → process.exit(2)
+  → the weekly cron is recorded FAILED every run and take-quality is never
+  measured. The sibling eval-cross-modal.ts:configureGatewayForCli() does it
+  correctly with `env: { ...process.env }` — the pattern eval-takes-quality.ts's
+  own comment claims to mirror. This patch nests env under the `env:` key so the
+  gateway has a defined env map; nothing else changes (model fields still come
+  from `...cfg`; the grok reroute still happens at the FIX-NA-1 chokepoint).
+  Validated live 2026-06-16: pre-fix INCONCLUSIVE (0/3 models, env[k] error,
+  exit 2); post-fix all 3/3 models score and a real verdict is returned.
+  NOT VF-specific — a vanilla gbrain bug affecting any `gbrain eval takes-quality`
+  invocation; filed upstream (clean 1-line fix).
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain fixes the configureGateway call in src/commands/eval-takes-quality.ts to pass a defined env map (e.g. `env: { ...process.env }`, mirroring eval-cross-modal.ts), so the takes-quality eval no longer crashes INCONCLUSIVE on undefined env. The still_needed_probe checks the buggy top-level-spread presence every upgrade."
+added: "2026-06-16"
+last_validated_ref: "gbrain@4ee530f"
+upstream: garrytan/gbrain
