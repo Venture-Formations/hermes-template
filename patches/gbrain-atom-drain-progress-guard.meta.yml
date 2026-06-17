@@ -47,5 +47,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain bases the extract_atoms drain no-progress break on real forward progress upstream (drops the `&& r.skipped === 0` gate / compares remaining counts), so re-discovered duplicates no longer keep the break from firing. The still_needed_probe checks the break shape every upgrade. NOT filed upstream — VF-only fork patch."
 added: "2026-06-15"
-last_validated_ref: "gbrain@4ee530f"
+last_validated_ref: "gbrain@70d5f36"
 upstream: garrytan/gbrain

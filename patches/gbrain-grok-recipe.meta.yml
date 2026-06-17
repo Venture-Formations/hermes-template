@@ -50,5 +50,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install + after gbrain-no-anthropic-reroute.sh on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain ships a native grok/xai openai-compat recipe pointed at a local Hermes proxy (the still_needed_probe detects this), OR the operator stops routing gbrain through the grok/SuperGrok subscription (reverting FIX-NA-1 to openrouter:auto and removing this recipe), OR gbrain gains a global config knob to set every default/utility model so the FIX-NA-1 repoint is no longer the only lever."
 added: "2026-06-14"
-last_validated_ref: "gbrain@4ee530f"
+last_validated_ref: "gbrain@70d5f36"
 upstream: garrytan/gbrain

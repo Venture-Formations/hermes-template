@@ -29,5 +29,5 @@ why: >
 reapply: docker-build
 deprecate_when: "garrytan/gbrain makes the takes-quality DEFAULT_MODEL_PANEL provider-agnostic/billing-safe AND adds a `WHERE active` filter to the eval sampler (every sibling take reader already filters active). The still_needed_probe checks both each upgrade. NOT filed upstream (operator decision 2026-06-16) — VF fork patch."
 added: "2026-06-16"
-last_validated_ref: "gbrain@4ee530f"
+last_validated_ref: "gbrain@70d5f36"
 upstream: garrytan/gbrain

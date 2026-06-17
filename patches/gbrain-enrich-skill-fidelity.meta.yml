@@ -37,7 +37,7 @@ why: >
 reapply: docker-build      # awk insert with sentinel idempotency; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain ships an equivalent verbatim-claim + contradiction-reconciliation rule upstream in enrich/SKILL.md (then drop the patch and adopt upstream)"
 added: "2026-06-05"
-last_validated_ref: "gbrain@4ee530f"
+last_validated_ref: "gbrain@70d5f36"
 anchor_verified: "2026-06-05: anchor '## Output Format' present at skills/enrich/SKILL.md:319 in garrytan/gbrain@099d9a8 (805814451ec9). Cited prose lines :60 / :179 and signal table :104-112 also confirmed present."
 upstream: garrytan/gbrain
 # UPSTREAM CANDIDATE: yes. This is a prose-quality improvement to a gbrain
