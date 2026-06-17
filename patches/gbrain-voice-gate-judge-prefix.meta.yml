@@ -1,0 +1,45 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-voice-gate-judge-prefix
+title: "Prefix the calibration voice-gate judge model `claude-haiku-4-5` -> `anthropic:claude-haiku-4-5` so the bare id stops throwing in parseModelId before the FIX-NA-1 reroute (which then reroutes it to grok, $0) instead of failing-soft the calibration_profile phase every cycle (FIX-VG-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-voice-gate-judge-prefix.sh
+source_sha: "75030e4021ef0a1379b22c07648aae3cda3da79d59d5ce1271fc9f761a678499"
+# anchor: the load-bearing bare-id literal the patch replaces, inside
+# defaultJudge() in core/calibration/voice-gate.ts. Checked present EXACTLY ONCE
+# at build time; if gbrain moves/renames it the patch FAILS THE BUILD (old
+# container keeps serving), forcing a re-point — never a silent no-op.
+anchor: "model: 'claude-haiku-4-5',"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/core/calibration/voice-gate.ts defaultJudge() calls gatewayChat with the PROVIDER-PREFIXED id `anthropic:claude-haiku-4-5` (NOT the vanilla bare `claude-haiku-4-5`). A bare id throws AIConfigError in parseModelId (missing provider prefix) BEFORE the FIX-NA-1 reroute, so the judge call would fail and the calibration_profile phase would fail-soft to error every cycle (voice gate dark). With the prefix, parseModelId succeeds and the call routes through the resolveRecipe chokepoint where FIX-NA-1 reroutes the anthropic: id to grok ($0). The call still goes through the gateway (no new native Anthropic client) so anthropic-scan stays green."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-voice-gate-judge-prefix.probe.sh
+target_files:
+  - "gbrain src/core/calibration/voice-gate.ts (defaultJudge, the gatewayChat model id, ~L163)"   # DOC ONLY — upstream gbrain file
+why: >
+  core/calibration/voice-gate.ts defaultJudge() calls the calibration voice-gate
+  Haiku judge via gatewayChat with a PREFIX-LESS model id ('claude-haiku-4-5').
+  parseModelId() in core/ai/model-resolver.ts THROWS AIConfigError on a prefix-less
+  id (missing provider prefix), and it throws BEFORE the FIX-NA-1 reroute (which is
+  injected after the parseModelId anchor). So FIX-NA-1 never reaches this call: the
+  judge throws, the throw escapes gateVoice() (the judge call is not in the
+  generator try/catch), and CalibrationProfilePhase fails-soft to an error every
+  cycle — the calibration voice gate is silently dark on any brain with >= 5
+  resolved takes. This deployment provisions no ANTHROPIC_API_KEY. Prefixing the id
+  to 'anthropic:claude-haiku-4-5' makes parseModelId succeed, after which FIX-NA-1
+  reroutes anthropic -> openrouter:auto / live default (grok, $0). The call still
+  routes through the gateway/resolveRecipe chokepoint (no new native client), so
+  anthropic-scan stays green. Identical remedy to FIX-CME-1 for the cross-modal
+  default slots. NOT a config knob fix: defaultJudge hardcodes the id and there is
+  no voice_gate.judge_model config — a source patch at the literal is the minimal,
+  anchor-stable fix consistent with the established eval-patch pattern.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain prefixes the voice-gate judge id itself (e.g. `anthropic:claude-haiku-4-5`), OR gbrain goes provider-agnostic / adds a global route knob so a bare id no longer throws in parseModelId. The still_needed_probe checks for the bare `claude-haiku-4-5` literal every upgrade."
+added: "2026-06-17"
+last_validated_ref: "gbrain@70d5f36"
+upstream: garrytan/gbrain
