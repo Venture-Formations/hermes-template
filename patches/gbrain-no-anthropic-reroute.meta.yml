@@ -15,7 +15,7 @@ source_sha: "42f7e0e91bfe3e4656ceb83a0d752c20a858268a16e425abf7fd37309a8708e2"
 # re-point — never a silent no-op.
 anchor: "const parsed = parseModelId(modelId);"
 # invariant: runtime assertion verify-upgrade.sh + anthropic-scan.sh check.
-invariant: "src/core/ai/model-resolver.ts resolveRecipe contains the VF-FIX-NA-1 sentinel and re-routes a native anthropic: id with no ANTHROPIC_API_KEY to openrouter:auto; anthropic-scan.sh reports the guarantee holds (sentinel present + no un-allowlisted native-anthropic client construction)."
+invariant: "src/core/ai/model-resolver.ts resolveRecipe contains the VF-FIX-NA-1 sentinel and re-routes a native anthropic: id with no ANTHROPIC_API_KEY (this patch EMITS `openrouter:auto` as the reroute target, which the later FIX-GROK-1 patch REPOINTS to the live default via getChatModel() with a `grok:grok-4.3` fallback — OPENROUTER_API_KEY was removed from Railway 2026-06-14, so openrouter:auto is no longer a funded route); anthropic-scan.sh reports the guarantee holds (sentinel present + no un-allowlisted native-anthropic client construction)."
 # still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
 # candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
 still_needed_probe: patches/gbrain-no-anthropic-reroute.probe.sh

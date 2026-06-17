@@ -60,8 +60,11 @@ customizations (detailed in the sections below):
   `hermes-workspace/MODIFICATIONS.md`). The load-bearing one is
   **`gbrain-no-anthropic-reroute.sh` (FIX-NA-1)** + its fail-closed
   **`anthropic-scan.sh`**: a single guard at gbrain's `resolveRecipe()` chokepoint
-  re-routes native `anthropic:` ids → `openrouter:auto` so the brain runs on
-  `OPENROUTER_API_KEY` (we have no `ANTHROPIC_API_KEY`). Replaces the retired
+  re-routes native `anthropic:` ids → the live default (FIX-NA-1 emits
+  `openrouter:auto`, which the FIX-GROK-1 patch repoints to `grok:grok-4.3` via the
+  keyless Hermes xAI-OAuth proxy recipe) so the brain runs on the operator's grok /
+  SuperGrok subscription (we have no `ANTHROPIC_API_KEY`, and `OPENROUTER_API_KEY`
+  was removed from Railway 2026-06-14). Replaces the retired
   literal-rewrite `gbrain-openrouter-model-defaults.sh`. Each patch is applied at
   build time, re-applied on every `GBRAIN_REF` bump, self-audits (fails the build
   on anchor drift), and carries a `<id>.probe.sh` obsolescence check. **⚠️ must be
@@ -234,7 +237,10 @@ load.
 **Why.** A gbrain model string's provider prefix selects the API key:
 `anthropic:claude-sonnet-4-6` → Anthropic API (`ANTHROPIC_API_KEY`);
 `openrouter:auto` → OpenRouter (`OPENROUTER_API_KEY`, may still route to Claude).
-This deployment provisions **only** `OPENROUTER_API_KEY` + `OPENAI_API_KEY`
+This deployment routes gbrain chat through the operator's grok / SuperGrok
+subscription (keyless, via the Hermes xAI-OAuth proxy); the only provisioned LLM
+key is `OPENAI_API_KEY` (utility paths). `OPENROUTER_API_KEY` was removed from
+Railway 2026-06-14 — do NOT re-introduce an `openrouter:auto` route, it is unfunded.
 (**never** a native Anthropic key — operator decision). gbrain hardcodes native
 `anthropic:` defaults at dozens of touchpoints with no global config knob; any
 that reach a native `anthropic:` recipe throw inside `chat()` and are swallowed
@@ -246,7 +252,8 @@ literals remain" — a coverage boundary that lost to a release-less master (a n
 touchpoint in an unmatched shape = a fresh silent zero). gbrain resolves EVERY
 model string through one chokepoint — `resolveRecipe()` / `parseModelId()` in
 `src/core/ai/model-resolver.ts` — so this patch injects a single guard there: a
-native `anthropic:` id with no `ANTHROPIC_API_KEY` re-routes to `openrouter:auto`.
+native `anthropic:` id with no `ANTHROPIC_API_KEY` re-routes to the live default
+(FIX-NA-1 emits `openrouter:auto`; FIX-GROK-1 repoints it to `grok:grok-4.3`).
 One site subsumes all the literals AND auto-covers any new touchpoint upstream
 adds; the literals can stay (harmless once rerouted). Companion **`anthropic-scan.sh`**
 (+ `anthropic-allowlist.txt`) runs right after and **fails the build closed** if

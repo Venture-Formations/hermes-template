@@ -390,6 +390,39 @@ RUN bash /app/patches/gbrain-eval-takes-quality-gateway-env.sh && \
 RUN bash /app/patches/gbrain-takes-quality-eval-meter.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-patterns-gateway-route (FIX-PG-1) ----------
+# The patterns dream phase hard-gates on a literal native key:
+#   if (!process.env.ANTHROPIC_API_KEY) return skipped('no_api_key', ...)
+# This deployment provisions NO ANTHROPIC_API_KEY (the brain runs on grok via the
+# xAI-OAuth proxy + FIX-NA-1), so the phase no-ops on EVERY cycle (autopilot AND
+# the nightly dream-cycle.sh loop) and produces zero pattern pages. The gate sits
+# BEFORE model resolution so FIX-NA-1 cannot help. patterns owns no LLM client —
+# it submits a subagent job that (agent.use_gateway_loop=true) routes through the
+# gateway -> resolveRecipe (the FIX-NA-1 chokepoint) -> grok ($0); the legacy
+# native path is FIX-NA-2-guarded (never silently bills). This removes the env
+# gate so the phase runs its gateway-routed subagent. Must run AFTER
+# gbrain-no-anthropic-reroute.sh (the reroute it relies on). Idempotent +
+# self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving)
+# on anchor drift. See patches/gbrain-patterns-gateway-route.meta.yml.
+RUN bash /app/patches/gbrain-patterns-gateway-route.sh && \
+    gbrain --version
+
+# --- VF gbrain CORE patch: gbrain-voice-gate-judge-prefix (FIX-VG-1) ---------
+# core/calibration/voice-gate.ts defaultJudge() calls the calibration voice
+# gate's Haiku judge with a PREFIX-LESS model id ('claude-haiku-4-5').
+# parseModelId() throws on a bare id (missing provider prefix) BEFORE the FIX-NA-1
+# reroute runs, so the judge call fails, the throw escapes gateVoice(), and the
+# calibration_profile phase fails-soft to error every cycle (the voice gate is
+# silently dark). This deployment provisions no ANTHROPIC_API_KEY. Prefixing the
+# id to 'anthropic:claude-haiku-4-5' makes parseModelId succeed, after which
+# FIX-NA-1 reroutes anthropic -> grok ($0). The call still routes through the
+# gateway (no new native client) so anthropic-scan stays green. Must run AFTER
+# gbrain-no-anthropic-reroute.sh (the reroute it relies on). Idempotent +
+# self-auditing: FAILS THE BUILD (old container keeps serving) on anchor drift.
+# See patches/gbrain-voice-gate-judge-prefix.meta.yml.
+RUN bash /app/patches/gbrain-voice-gate-judge-prefix.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

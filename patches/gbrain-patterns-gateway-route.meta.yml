@@ -1,0 +1,50 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-patterns-gateway-route
+title: "Remove the native ANTHROPIC_API_KEY gate in the patterns dream phase so it routes through the FIX-NA-1 gateway (grok) instead of no-op'ing `no_api_key` every cycle (FIX-PG-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-patterns-gateway-route.sh
+source_sha: "b1ffb622bfd4f0007d3cccd70ba21cc96320f5c42e8fdacdaa27d38b18779a93"
+# anchor: the native-key gate the patch removes. Returns skipped('no_api_key')
+# whenever ANTHROPIC_API_KEY is unset — which it always is on this fork — so the
+# patterns phase never produces a page. Checked present EXACTLY ONCE at build
+# time; if gbrain changes the gate the patch FAILS THE BUILD (old container keeps
+# serving), forcing a re-point — never a silent no-op.
+anchor: "if (!process.env.ANTHROPIC_API_KEY) {"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/core/cycle/patterns.ts no longer short-circuits on `if (!process.env.ANTHROPIC_API_KEY) return skipped('no_api_key', ...)`. The phase proceeds to submit its theme-detection subagent, which (agent.use_gateway_loop=true) routes via runSubagentViaGateway -> gateway.toolLoop -> resolveRecipe (the FIX-NA-1 chokepoint) so the anthropic: model id reroutes to grok ($0). patterns constructs no native Anthropic client of its own (the only native construction, in minions/handlers/subagent.ts, is FIX-NA-2-guarded). With >= min_evidence reflections the phase produces pattern pages under wiki/personal/patterns/; below that it still skips 'insufficient_evidence' (no runaway cost)."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-patterns-gateway-route.probe.sh
+target_files:
+  - "gbrain src/core/cycle/patterns.ts (runPhasePatterns, the ANTHROPIC_API_KEY gate, ~L67)"   # DOC ONLY — upstream gbrain file
+why: >
+  The patterns dream phase (cross-session theme detection) hard-gates on a literal
+  `if (!process.env.ANTHROPIC_API_KEY) return skipped('no_api_key', ...)` at
+  src/core/cycle/patterns.ts:67. This deployment provisions NO ANTHROPIC_API_KEY
+  (operator decision; the brain runs on grok via the Hermes xAI-OAuth proxy +
+  FIX-NA-1), so the phase returns skipped('no_api_key') on EVERY cycle — in
+  autopilot AND the nightly dream-cycle.sh loop (patterns is a CHEAP_PHASE) — and
+  NO pattern pages are ever produced. The gate sits BEFORE model resolution, so
+  FIX-NA-1 cannot help: the phase short-circuits before the resolveRecipe
+  chokepoint is reached. The gate is the WRONG check: patterns owns no LLM client;
+  it submits a subagent MinionQueue job, and with agent.use_gateway_loop=true the
+  subagent handler routes via runSubagentViaGateway -> gateway.toolLoop ->
+  resolveRecipe (the FIX-NA-1 chokepoint), so the resolved anthropic: id reroutes
+  to grok ($0). The model is always provider-prefixed (resolveModel -> resolveAlias
+  -> anthropic:claude-sonnet-4-6), so it passes the subagent capability gate, and
+  the legacy native path is FIX-NA-2-guarded (throws ERR_NATIVE_ANTHROPIC_BLOCKED
+  with no key — never silently bills). This patch removes the env gate so the phase
+  runs its gateway-routed subagent. It adds no runaway cost: when reflections are
+  below min_evidence the phase still skips 'insufficient_evidence' earlier. NOT
+  purely VF-specific — the native-env gate breaks the patterns phase for any
+  non-Anthropic gateway deployment; filed upstream.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain drops the literal `process.env.ANTHROPIC_API_KEY` gate in src/core/cycle/patterns.ts and routes the patterns subagent through the gateway like every other phase (so a non-Anthropic deployment no longer no-ops the phase). The still_needed_probe checks for the buggy native-key gate every upgrade."
+added: "2026-06-17"
+last_validated_ref: "gbrain@70d5f36"
+upstream: garrytan/gbrain
