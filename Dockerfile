@@ -423,6 +423,22 @@ RUN bash /app/patches/gbrain-patterns-gateway-route.sh && \
 RUN bash /app/patches/gbrain-voice-gate-judge-prefix.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-cycle-abort-signal (FIX-CYCLE-ABORT-1) -----
+# A timed-out autopilot-cycle handler cannot be killed; it holds the per-source
+# cycle DB lock until runCycle's finally. The two phases that REFRESH the lock
+# every 30s (extract_atoms + synthesize_concepts) enter their LLM loop WITHOUT
+# the job's AbortSignal, so a per-job-timeout abort is ignored and the zombie
+# holds the lock until its page budget exhausts → the `default` queue wedges
+# until a human restarts the worker (the 2026-06-18 incident). This patch threads
+# `signal: opts.signal` into both dispatch sites + adds a cooperative loop-top
+# `isAborted` break + forwards `abortSignal` into the per-item chat() — a direct
+# continuation of the merged #1972 consolidate.ts idiom. Page/concept-boundary
+# abort only (no torn writes; both phases are idempotent on retry). Idempotent +
+# self-auditing: FAILS THE BUILD (old container keeps serving) on anchor drift.
+# See patches/gbrain-cycle-abort-signal.meta.yml + UPGRADING_GBRAIN.md.
+RUN bash /app/patches/gbrain-cycle-abort-signal.sh && \
+    gbrain --version
+
 # --- youtube-playlist-sync collector deps (yt-dlp + ffmpeg) ----------------
 # The workspace `youtube-playlist-sync` skill (hourly `youtube-playlist-sync`
 # cron) shells out to yt-dlp (caption + audio download) and ffmpeg (Whisper-

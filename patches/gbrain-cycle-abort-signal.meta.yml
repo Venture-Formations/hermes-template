@@ -1,0 +1,53 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-cycle-abort-signal
+title: "Thread the job AbortSignal into the lock-refreshing cycle phases (extract_atoms + synthesize_concepts) + a cooperative loop-top isAborted break, so a per-job-timeout handler exits at the next page/concept boundary and releases the per-source cycle lock instead of zombie-holding it and wedging the queue (FIX-CYCLE-ABORT-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-cycle-abort-signal.sh
+source_sha: "8122bb1433c625c895cf24c6add9c0b53679b78a3f374bd7df49f9e1ed8b8736"
+# anchor: the load-bearing literal the patch self-audits (the yieldDuringPhase
+# dispatch line shared by the two refreshing phases — checked -qF in PREFLIGHT;
+# a moved anchor FAILS THE BUILD, old container keeps serving). 10 edit sites
+# across 3 files, each grepped before its perl insert.
+anchor: "yieldDuringPhase: buildYieldDuringPhase(lock, opts.yieldDuringPhase),"
+# invariant: runtime assertion verify-upgrade.sh can re-check on-container.
+invariant: "src/core/cycle/extract-atoms.ts (ExtractAtomsOpts) and synthesize-concepts.ts (SynthesizeConceptsOpts) declare `signal?: AbortSignal`, import isAborted from ../abort-check.ts, break at the TOP of their OUTER work loop on `isAborted(opts.signal)`, and forward `abortSignal: opts.signal` into the per-item chat() call; src/core/cycle.ts passes `signal: opts.signal` into BOTH the runPhaseExtractAtoms and runPhaseSynthesizeConcepts dispatch opts. Without it a per-job-timeout abort is ignored by these two lock-REFRESHING phases, so the force-evicted-but-alive handler holds the per-source cycle lock until its page budget exhausts and the `default` queue wedges until a human restarts the worker."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-cycle-abort-signal.probe.sh
+target_files:
+  - "gbrain src/core/cycle.ts (runPhaseExtractAtoms + runPhaseSynthesizeConcepts dispatch, ~L1796/L1899)"   # DOC ONLY — upstream gbrain file
+  - "gbrain src/core/cycle/extract-atoms.ts (ExtractAtomsOpts + work loop + chat call)"                      # DOC ONLY
+  - "gbrain src/core/cycle/synthesize-concepts.ts (SynthesizeConceptsOpts + group loop + chat call)"          # DOC ONLY
+why: >
+  A timed-out autopilot-cycle job cannot be killed: the Minions worker fires the
+  per-job timeout (abort.abort('timeout')), waits 30s, then force-evicts the job
+  from its in-memory inFlight set and logs "did not exit within 30s of abort … the
+  handler is still running". It holds NO handle to the cycle lock. The still-running
+  handler is inside runCycle, which holds the per-source cycle DB lock until its
+  finally. So a zombie handler holds the lock indefinitely and every subsequent
+  cycle starves → the `default` queue wedges until a human restarts the worker
+  (the 2026-06-18 incident — cycle jobs 3899/3900/3902/3907/3909 each hit the 600s
+  timeout and zombie'd). Multi-agent root cause: five ALL_PHASES phases enter their
+  LLM loop without the job's AbortSignal; three (propose/grade/calibration) never
+  refresh the lock so the 5-min TTL lapses and the next cycle STEALS the lock —
+  painful but self-healing. The other two — extract_atoms + synthesize_concepts —
+  REFRESH the lock every 30s via buildYieldDuringPhase, so the steal-grace never
+  fires and the zombie holds the lock until its full page budget exhausts. THAT is
+  the unbounded, restart-required wedge. This patch applies the merged #1972
+  consolidate.ts cooperative-abort idiom (which cycle.ts already threads into
+  consolidate) to these two phases. Page/concept-boundary abort only — both phases
+  are idempotent on retry (extract_atoms content_hash-keyed putPage; synth writes
+  a deterministic concept slug), so abort-then-retry under a 429 bench re-scans
+  safely with no torn rows. The self-healing trio + the two latent gateway sites
+  (expandQuery/generateOcrText) are a tracked follow-up; the start.sh worker-restart
+  backstop covers every phase as a safety net.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain threads the abort signal into extract_atoms + synthesize_concepts itself — i.e. these phases gain a `signal?: AbortSignal` opt + a cooperative isAborted/aborted check inside their loop, like the merged consolidate.ts (#1972). The still_needed_probe checks for that signature against the vanilla candidate tree every upgrade."
+added: "2026-06-18"
+last_validated_ref: "gbrain@70d5f36"
+upstream: garrytan/gbrain

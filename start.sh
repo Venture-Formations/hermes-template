@@ -594,10 +594,39 @@ RECLAIMEOF
   if command -v gbrain >/dev/null 2>&1 && [ -f "$HOME/.gbrain/start-autopilot.sh" ]; then
     AP_LOCK="$HOME/.gbrain/autopilot.lock"
     AP_STALE_AFTER=600
-    echo "[autopilot-supervisor] arming liveness supervisor (relaunch when ${AP_LOCK} mtime >= ${AP_STALE_AFTER}s stale or absent)"
+    # FIX-CYCLE-ABORT-1 companion backstop: a per-job-timeout aborts a cycle job
+    # but the worker CANNOT kill the handler — it force-evicts it from inFlight,
+    # logs "did not exit within 30s of abort", and the zombie keeps holding the
+    # per-source cycle lock until runCycle returns, wedging the `default` queue.
+    # The gbrain-cycle-abort-signal patch makes the two lock-REFRESHING phases
+    # exit cleanly; this watches the autopilot log for a NEW zombie (any phase /
+    # a pre-patch image) and restarts the jobs worker — the daemon reforks it,
+    # killing the zombie + releasing the lock (the manual fix from 2026-06-18).
+    AP_LOG="$HOME/.gbrain/autopilot.log"
+    WK_ZOMBIE_PAT='did not exit within 30s of abort'
+    WK_ZOMBIE_SEEN=0
+    [ -f "$AP_LOG" ] && WK_ZOMBIE_SEEN=$(grep -cF "$WK_ZOMBIE_PAT" "$AP_LOG" 2>/dev/null || echo 0)
+    echo "[autopilot-supervisor] arming liveness supervisor (relaunch daemon when ${AP_LOCK} mtime >= ${AP_STALE_AFTER}s stale or absent; restart worker on a new '${WK_ZOMBIE_PAT}')"
     (
       while true; do
         sleep 60
+        # --- worker-zombie backstop: restart the jobs worker on a NEW force-evict ---
+        if [ -f "$AP_LOG" ]; then
+          zc=$(grep -cF "$WK_ZOMBIE_PAT" "$AP_LOG" 2>/dev/null || echo 0)
+          if [ "$zc" -lt "$WK_ZOMBIE_SEEN" ]; then WK_ZOMBIE_SEEN="$zc"; fi   # log rotated -> rebaseline
+          if [ "$zc" -gt "$WK_ZOMBIE_SEEN" ]; then
+            WK_ZOMBIE_SEEN="$zc"
+            echo "[autopilot-supervisor] worker zombie detected (force-evicted handler still holding the cycle lock) — restarting the jobs worker to release it"
+            for d in /proc/[0-9]*; do
+              c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+              case "$c" in
+                *tini*) ;;                                   # skip the init wrapper
+                *"gbrain jobs work"*) kill "${d#/proc/}" 2>/dev/null && \
+                  echo "[autopilot-supervisor]   killed worker ${d#/proc/} (daemon ChildWorkerSupervisor will refork)";;
+              esac
+            done
+          fi
+        fi
         ap_age=-1
         if [ -f "$AP_LOCK" ]; then
           ap_mtime=$(stat -c %Y "$AP_LOCK" 2>/dev/null || stat -f %m "$AP_LOCK" 2>/dev/null || echo 0)
