@@ -292,6 +292,15 @@ function _normClaim(claim: string): string {
     .trim();
 }
 
+// FIX-TK-2-A (slug-collision guard): only stub-create a page for a real ENTITY
+// subject dir. NEVER for a source slug (e.g. sources/youtube/<id>): gbrain
+// lowercases slugs, so a source slug lowercases to a twin of the collector's
+// case-preserving filename, and stub-creating here mints a colliding
+// type:concept page that clobbers the real type:source page (shadowing its
+// content + dates). Mirrors route.ts SUBJECT_DIRS; a non-subject-dir slug is
+// routed to the DB-only fallback (page_id = origin row) instead.
+const STUB_SUBJECT_DIRS = new Set(['people', 'companies', 'concepts', 'topics', 'deals', 'deal']);
+
 /** Minimum canonical body for a brand-new entity page (mirrors facts stubEntityPage). */
 function stubEntityPage(slug: string): string {
   const prefix = slug.split('/')[0];
@@ -335,17 +344,18 @@ export async function writeTakesToFence(
       if (existsSync(filePath)) {
         body = readFileSync(filePath, 'utf-8');
       } else {
-        if (!target.slug.includes('/')) {
-          // Same guard as writeFactsToFence (facts/fence-write.ts:197): never
-          // spawn a phantom root page. The facts path logs to a stub-guard
-          // audit JSONL via logStubGuardEvent, but that event shape is
-          // facts-specific (`fact_count`); a takes audit surface is out of
-          // scope for this patch, so we warn-and-route like the facts console
-          // fallback. Caller routes these takes to the legacy DB-only path so
-          // they aren't silently dropped.
+        if (!STUB_SUBJECT_DIRS.has(target.slug.split('/')[0])) {
+          // FIX-TK-2-A: only stub-create for a real entity subject dir (people/
+          // companies/concepts/topics/deals). This BLOCKS both the original
+          // unprefixed-phantom-root case AND a source slug (sources/youtube/<id>),
+          // which would otherwise mint a colliding type:concept page that
+          // clobbers the real type:source page at the same lowercased slug.
+          // Caller routes these takes to the legacy DB-only path (page_id =
+          // origin row) so they are dated/graded/searchable — just not rendered
+          // in the source page body (acceptable for a no-subject source take).
           // eslint-disable-next-line no-console
           console.warn(
-            `[takes] refusing to stub-create unprefixed entity page slug=${target.slug} — routing to legacy DB-only path.`,
+            `[takes] refusing to stub-create non-subject-dir page slug=${target.slug} — routing to legacy DB-only path.`,
           );
           return { inserted: 0, rowNums: [], stubGuardBlocked: true };
         }

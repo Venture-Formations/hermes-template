@@ -9,7 +9,7 @@ category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-takes-notable-claims.sh
-source_sha: "73fe4bb503909ec25b98ba618f8b263f0b3b1045cce6fc864a0e5add68d2693f"
+source_sha: "43ee2760bcfb9be9df3d2540fbb93197833079d651fc3cc6248bd57d55a623ef"
 
 # anchor: the primary anchor the patch body self-audits. There are several edit
 # sites across one file plus two new files; each anchor is grepped in the .sh
@@ -50,7 +50,11 @@ invariant: >
   (markdown-first, via writeTakesToFence) attributed to the page's speaker,
   retaining the DB-only addTakesBatch path ONLY as the fallback sink for
   stubGuardBlocked / legacyFallback / fenceWriteFailed and routing no-subject
-  claims to their origin page (no regression). The FIX-TK-2-WIRING sentinel is
+  claims to their origin page (no regression). FIX-TK-2-A (2026-06-18): the
+  stub-create guard now requires a SUBJECT_DIR prefix (people/companies/concepts/
+  topics/deals) — a `sources/<...>` slug is stubGuardBlocked and routed DB-only
+  (page_id=origin row), preventing a lowercased source-slug twin from minting a
+  colliding type:concept page that clobbers the real type:source page. The FIX-TK-2-WIRING sentinel is
   present in extract-takes-from-pages.ts.
 
 still_needed_probe: patches/gbrain-takes-notable-claims.probe.sh
