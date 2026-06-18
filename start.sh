@@ -571,6 +571,52 @@ RECLAIMEOF
   fi
 ) || true
 
+# --- gbrain autopilot LIVENESS SUPERVISOR ----------------------------------
+# WHY (root-caused 2026-06-18): gbrain's ephemeral-container install target
+# launches the daemon exactly ONCE (the bootstrap above) and supervises it with
+# NOTHING — installEphemeralContainer() emits only a one-shot
+# `bash ~/.gbrain/start-autopilot.sh`, unlike the macos/systemd targets which
+# carry KeepAlive / Restart=always / ThrottleInterval. The daemon's OWN
+# self-recovery (autopilot.ts: exit(0) on wedge_restart) AND its ~10-min
+# stale-lock TAKEOVER both DELEGATE to an external supervisor that re-runs
+# `gbrain autopilot` — which on this container nothing did. So a wedged-but-alive
+# or cleanly-exited daemon stranded its heartbeat with no relaunch (the 25h
+# cycle_freshness stall). This loop is that missing supervisor.
+# HEARTBEAT: the daemon's tick loop refreshes ~/.gbrain/autopilot.lock mtime
+# every iteration; we relaunch via the canonical launcher whenever that mtime is
+# >= STALE_AFTER seconds old (== the daemon's own takeover threshold) or the lock
+# is gone. The relaunch is SELF-GUARDING: a live daemon with a fresh lock makes
+# `gbrain autopilot` detect it and exit (no double-launch); we only act on a
+# STALE lock, which triggers gbrain's existing stale-takeover. Backgrounded +
+# non-fatal (set +e): a supervisor hiccup must never block the gateway boot.
+(
+  set +e
+  if command -v gbrain >/dev/null 2>&1 && [ -f "$HOME/.gbrain/start-autopilot.sh" ]; then
+    AP_LOCK="$HOME/.gbrain/autopilot.lock"
+    AP_STALE_AFTER=600
+    echo "[autopilot-supervisor] arming liveness supervisor (relaunch when ${AP_LOCK} mtime >= ${AP_STALE_AFTER}s stale or absent)"
+    (
+      while true; do
+        sleep 60
+        ap_age=-1
+        if [ -f "$AP_LOCK" ]; then
+          ap_mtime=$(stat -c %Y "$AP_LOCK" 2>/dev/null || stat -f %m "$AP_LOCK" 2>/dev/null || echo 0)
+          if [ "$ap_mtime" -gt 0 ]; then
+            ap_age=$(( $(date +%s) - ap_mtime ))
+            if [ "$ap_age" -lt "$AP_STALE_AFTER" ]; then continue; fi
+          fi
+        fi
+        echo "[autopilot-supervisor] daemon heartbeat stale/absent (lock age ${ap_age}s) — relaunching via start-autopilot.sh"
+        bash "$HOME/.gbrain/start-autopilot.sh" 2>&1 | sed 's/^/[autopilot-supervisor] /' || \
+          echo "[autopilot-supervisor] WARN: relaunch exited non-zero; will retry next check"
+      done
+    ) &
+    echo "[autopilot-supervisor] backgrounded (pid $!; 60s heartbeat checks)"
+  else
+    echo "[autopilot-supervisor] gbrain not on PATH or start-autopilot.sh missing; skipping liveness supervisor"
+  fi
+) || true
+
 # --- gbrain HTTP MCP server (remote MCP for claude.ai / Cowork etc.) --------
 # Exposes the brain over MCP at https://gbrain.ventureformations.com/mcp
 # (Railway custom domain -> this container's port 8787). Canonical refs

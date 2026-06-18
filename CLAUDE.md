@@ -207,8 +207,19 @@ gbrain is now **baked into the Docker image**, not installed at runtime.
   launch the daemon explicitly rather than letting gbrain edit a bootstrap
   hook. The block is idempotent and strictly non-fatal: a gbrain failure is
   logged and never blocks the gateway.
-- Autopilot self-supervises (it forks/restarts the Minions worker), so no
-  external watchdog cron is needed.
+- Autopilot self-supervises only its **Minions worker** (forks/restarts the
+  worker on crash) — it does **NOT** supervise its own tick-loop PROCESS. On the
+  ephemeral-container install target that process is launched ONCE with no
+  relaunch (the macos/systemd targets carry `Restart=always`; the ephemeral one
+  does not), and the daemon's own self-recovery (`exit(0)` on wedge) + 10-min
+  stale-lock takeover both DELEGATE to an external supervisor. So a
+  wedged-but-alive or cleanly-exited daemon strands with no relaunch — the
+  2026-06-18 ~25h `cycle_freshness` stall. `start.sh` therefore carries an
+  **autopilot liveness supervisor**: a backgrounded loop that relaunches via
+  `~/.gbrain/start-autopilot.sh` whenever the `~/.gbrain/autopilot.lock`
+  heartbeat goes ≥600s stale or absent (self-guarding against double-launch via
+  gbrain's existing stale-takeover). Root-caused by the multi-agent descent;
+  the proper upstream fix is for gbrain's ephemeral target to ship a supervisor.
 
 ## gbrain core patches (`patches/`)
 
