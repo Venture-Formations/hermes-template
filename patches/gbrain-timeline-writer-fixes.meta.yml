@@ -84,7 +84,7 @@ deprecate_when: >
   independently as they land upstream; keep the patch until all three are covered.
 
 added: "2026-06-08"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 anchor_verified: >
   2026-06-08: TL-1 anchor 'date: new Date().toISOString().split(T)[0] ?? ','
   at src/core/enrichment-service.ts:116 (inside addTimelineEntry try-block);

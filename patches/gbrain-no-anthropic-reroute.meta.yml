@@ -39,5 +39,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain stops hardcoding native anthropic: model defaults (goes provider-agnostic / fully config-driven), OR resolveRecipe gains its own no-ANTHROPIC_API_KEY reroute/guard upstream, OR an ANTHROPIC_API_KEY is provisioned for this deployment (operator has ruled this out). The still_needed_probe checks the first two automatically every upgrade."
 added: "2026-06-09"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 upstream: garrytan/gbrain

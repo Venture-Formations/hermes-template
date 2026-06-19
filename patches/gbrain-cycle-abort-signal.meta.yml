@@ -49,5 +49,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain threads the abort signal into extract_atoms + synthesize_concepts itself — i.e. these phases gain a `signal?: AbortSignal` opt + a cooperative isAborted/aborted check inside their loop, like the merged consolidate.ts (#1972). The still_needed_probe checks for that signature against the vanilla candidate tree every upgrade."
 added: "2026-06-18"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 upstream: garrytan/gbrain

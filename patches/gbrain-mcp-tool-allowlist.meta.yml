@@ -28,5 +28,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "gbrain ships a native MCP tool-allowlist / scope-filtered tool list flag"
 added: "2026-06-04"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 upstream: garrytan/gbrain

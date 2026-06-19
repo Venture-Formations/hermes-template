@@ -53,5 +53,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain routes the subagent loop through the gateway / resolveRecipe upstream — i.e. the subagent handler no longer constructs a native `new Anthropic()` default outside the rerouted chokepoint. The still_needed_probe checks for the native fallback every upgrade."
 added: "2026-06-09"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 upstream: garrytan/gbrain

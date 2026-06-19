@@ -28,5 +28,5 @@ why: >
 reapply: docker-build
 deprecate_when: "garrytan/gbrain ships kind-conservatism + weight-magnitude guidance + a named-trivia Skip list in CLASSIFIER_SYSTEM (the still_needed_probe checks the vanilla prompt for these). NOT filed upstream (operator decision 2026-06-16) — VF fork patch."
 added: "2026-06-16"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 upstream: garrytan/gbrain

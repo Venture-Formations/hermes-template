@@ -96,7 +96,7 @@ deprecate_when: >
   produces a `## Takes` fence on the resolved entity page without it.
 
 added: "2026-06-08"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 anchor_verified: >
   2026-06-08: at gbrain@099d9a8 (v0.42.34.0), the takes core files are FLAT under
   src/core/ (NOT src/core/takes/ — that dir does not exist; the patch CREATES it

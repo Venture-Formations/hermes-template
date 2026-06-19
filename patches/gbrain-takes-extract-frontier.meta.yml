@@ -30,5 +30,5 @@ why: >
 reapply: docker-build
 deprecate_when: "garrytan/gbrain adds an already-has-takes / updated_at-cursor frontier to extractTakesFromPages (the still_needed_probe checks for the NOT EXISTS / cursor). NOT filed upstream (operator decision 2026-06-16) — VF fork patch."
 added: "2026-06-16"
-last_validated_ref: "gbrain@70d5f36"
+last_validated_ref: "gbrain@9bf96db"
 upstream: garrytan/gbrain

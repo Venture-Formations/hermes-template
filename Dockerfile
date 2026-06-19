@@ -92,12 +92,15 @@ ENV PATH="/usr/local/bun/bin:$PATH"
 # gbrain ships via master (no GitHub release tags), so we pin a specific master
 # commit for reproducible builds. Bumping this ARG also busts Docker's layer
 # cache for the install below, forcing a fresh pull on upgrade.
-# Current: v0.42.50.0 — master @ 2026-06-17, commit 70d5f36 (all 22 core patches
-# re-validated STILL-NEEDED against this ref via still_needed_probe; 0 obsoleted,
-# 0 anchor conflicts — incl. the serve-http.ts + cycle.ts files upstream touched).
+# Current: v0.42.51.0 — master @ 2026-06-17, commit 9bf96db (#2255 sync reliability:
+# contention-free page-clock v118, op_checkpoints scalar-guard v119, honest sync
+# freshness). All 22 core patches re-validated STILL-NEEDED via still_needed_probe;
+# 0 obsoleted, 0 anchor conflicts (touches doctor/sync/migrate/op-checkpoint/
+# query-cache — none are our patch anchors). Bumped to FIX the live op_checkpoints
+# scalar corruption on extract-conversation-facts (v119 repair + loader guard).
 # To upgrade: set GBRAIN_REF to the new master sha, push this branch, then run
 # `gbrain post-upgrade` + verify-upgrade.sh on the container (UPGRADING_GBRAIN.md §0).
-ARG GBRAIN_REF=70d5f36db60d435b40f83031473f1911f6bc2f9a
+ARG GBRAIN_REF=9bf96db807c2f050449142f2f0b05726f58e5054
 RUN curl -fsSL https://bun.sh/install | bash && \
     bun install -g github:garrytan/gbrain#${GBRAIN_REF} && \
     # Smoke check — fail the build loudly if the gbrain ref is unresolvable
