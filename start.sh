@@ -606,10 +606,31 @@ RECLAIMEOF
     WK_ZOMBIE_PAT='did not exit within 30s of abort'
     WK_ZOMBIE_SEEN=0
     [ -f "$AP_LOG" ] && WK_ZOMBIE_SEEN=$(grep -cF "$WK_ZOMBIE_PAT" "$AP_LOG" 2>/dev/null || echo 0)
-    echo "[autopilot-supervisor] arming liveness supervisor (relaunch daemon when ${AP_LOCK} mtime >= ${AP_STALE_AFTER}s stale or absent; restart worker on a new '${WK_ZOMBIE_PAT}')"
+    # JOBS-SUPERVISOR ensure (2026-06-18 post-deploy queue-stall fix). The boot
+    # launcher (start-autopilot.sh) starts ONLY the autopilot daemon, whose single
+    # ChildWorkerSupervisor worker is concurrency-1 — one long job (e.g.
+    # extract-conversation-facts across many emails) monopolizes it and starves the
+    # `default` queue. The standalone `gbrain jobs supervisor` is the PARALLEL drain
+    # pool (concurrency 2) and nothing starts it on boot (it stranded the queue after
+    # the FIX-CYCLE-ABORT-1 swap until a manual restart). Keep it up. `start`
+    # self-steals a stale supervisor lock left by the prior container after its grace;
+    # job claim is FOR UPDATE SKIP LOCKED so this pool coexists safely with the
+    # daemon's worker. `stop` first clears a stale pid/lock from the dead container.
+    ensure_jobs_supervisor() {
+      for d in /proc/[0-9]*; do
+        c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null) || continue
+        case "$c" in *"gbrain jobs supervisor"*) return 0;; esac   # already up
+      done
+      echo "[autopilot-supervisor] standalone jobs supervisor (parallel drain pool) absent — clearing stale state + starting"
+      gbrain jobs supervisor stop >/dev/null 2>&1 || true
+      nohup gbrain jobs supervisor start > /tmp/jobs-supervisor.log 2>&1 &
+    }
+    ensure_jobs_supervisor   # boot-time: bring the parallel drain pool up immediately
+    echo "[autopilot-supervisor] arming liveness supervisor (relaunch daemon on stale lock; restart worker on a new '${WK_ZOMBIE_PAT}'; keep the standalone jobs supervisor up)"
     (
       while true; do
         sleep 60
+        ensure_jobs_supervisor   # re-assert the parallel drain pool if it died
         # --- worker-zombie backstop: restart the jobs worker on a NEW force-evict ---
         if [ -f "$AP_LOG" ]; then
           zc=$(grep -cF "$WK_ZOMBIE_PAT" "$AP_LOG" 2>/dev/null || echo 0)
