@@ -158,6 +158,21 @@ RUN bash /app/patches/gbrain-no-anthropic-reroute.sh && \
 RUN bash /app/patches/gbrain-grok-recipe.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: op-checkpoint jsonb-array write (FIX-OCK-1) -------
+# recordCompleted binds JSON.stringify(sorted) to a $3::jsonb cast; on the
+# Postgres engine postgres.js double-encodes it to a jsonb SCALAR STRING, which
+# trips migration v119's op_checkpoints_completed_keys_array CHECK
+# (jsonb_typeof='array') -> the sync-target pin write aborts EVERY incremental
+# sync ("imported 0 of N") and the brain silently goes stale. Rewrites the write
+# to to_jsonb($3::text[]) binding the raw string[] (mirrors the in-file
+# appendCompleted precedent + the upstream-convergent PRs). Independent of the
+# other patches (op-checkpoint.ts). TIME-BOXED: self-obsoletes when master lands
+# the same fix (the still_needed_probe flips OBSOLETE on the next bump).
+# Idempotent; FAILS THE BUILD LOUDLY (old container keeps serving) if its anchor
+# moved. See patches/gbrain-op-checkpoint-jsonb-array.meta.yml + UPGRADING_GBRAIN.md.
+RUN bash /app/patches/gbrain-op-checkpoint-jsonb-array.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch: grok budget unmetered (FIX-GROK-BUDGET-1) --------
 # The grok recipe above is keyless/flat-rate (operator SuperGrok OAuth via the
 # Hermes proxy), so grok:grok-4.3 is intentionally absent from gbrain's pricing

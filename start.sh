@@ -35,6 +35,24 @@ fi
 # container), so removing the file unconditionally is safe.
 rm -f /data/.hermes/gateway.pid
 
+# --- git credentials for private VF repo pulls (workspace-pull + /data/brain) -
+# The VF GitHub repos are PRIVATE; /data/workspace and /data/brain pull over
+# HTTPS via the `store` credential helper -> /data/.git-credentials. That file
+# lives on the volume and was found EMPTY (0 bytes) on 2026-06-19, silently
+# killing workspace-pull AND brain git pull for days (autopilot sync then ran off
+# stale local state, and a GBRAIN_REF re-stamp could not propagate). Seed it from
+# a Railway service var on EVERY boot so it self-heals across rebuilds and a
+# re-emptied file. Non-fatal: unset -> warn + continue (an existing non-empty
+# file keeps working). x-access-token is GitHub's username convention for token
+# auth (works for PATs / fine-grained tokens).
+if [ -n "${GIT_HTTPS_TOKEN:-}" ]; then
+  ( umask 077; printf 'https://%s:%s@github.com\n' "${GIT_HTTPS_USER:-x-access-token}" "${GIT_HTTPS_TOKEN}" > /data/.git-credentials )
+  git config --global credential.helper 'store --file /data/.git-credentials'
+  echo "[start] seeded /data/.git-credentials from GIT_HTTPS_TOKEN (private-repo pulls enabled)"
+else
+  echo "[start] WARN: GIT_HTTPS_TOKEN unset — not seeding /data/.git-credentials; private workspace/brain pulls will fail if the file is empty"
+fi
+
 # --- gbrain boot-task runner (Railway-MCP-drivable; no `railway ssh` needed) --
 # Container-side gbrain maintenance you can trigger purely through the Railway
 # MCP (which has no exec/ssh tool): set the GBRAIN_BOOT_TASK service variable

@@ -1,0 +1,45 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md + lock.
+# If you edit the .sh, you MUST update source_sha (run the generator) — the
+# pre-commit --check fails on mismatch, forcing a re-read of why/deprecate_when.
+id: gbrain-op-checkpoint-jsonb-array
+title: "recordCompleted binds string[] -> to_jsonb($3::text[]) so completed_keys is a real jsonb array (FIX-OCK-1, time-boxed bridge)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-op-checkpoint-jsonb-array.sh
+source_sha: "1b52ed30fbe236653379966d5a37b87319f06f7ad64dc63df88d9e574d024488"
+# anchor: the exact gbrain source line the patch rewrites; checked present in the
+# PATCH BODY by --check. If gbrain rewrites recordCompleted the patch FAILS THE
+# BUILD (old container keeps serving), forcing a re-point or retirement.
+anchor: "VALUES ($1, $2, $3::jsonb, now())"
+# invariant: runtime assertion verify-upgrade.sh checks.
+invariant: "src/core/op-checkpoint.ts recordCompleted contains the VF-FIX-OCK-1 sentinel, builds completed_keys with to_jsonb($3::text[]) binding the raw string[], and the broken `$3::jsonb` + `JSON.stringify(sorted)` pair is absent — so the v119 op_checkpoints_completed_keys_array CHECK is satisfied and the sync-target checkpoint write (hence every incremental sync) succeeds."
+# still_needed_probe: per-upgrade obsolescence check (run against the VANILLA
+# candidate tree). Exit 0=still needed, 1=obsolete (recommend retire), 2=unknown.
+still_needed_probe: patches/gbrain-op-checkpoint-jsonb-array.probe.sh
+target_files:
+  - "src/core/op-checkpoint.ts"   # DOC ONLY — upstream gbrain file, not in any checked-out repo
+why: >
+  gbrain recordCompleted persists completed_keys via `JSON.stringify(sorted)`
+  bound to a `$3::jsonb` cast through executeRawDirect -> postgres.js `.unsafe()`.
+  On the POSTGRES engine (this deployment is Supabase Postgres, not gbrain's
+  PGLite test default) postgres.js double-encodes the stringified array into a
+  jsonb SCALAR STRING, which violates migration v119's CHECK constraint
+  op_checkpoints_completed_keys_array (jsonb_typeof = 'array', shipped in
+  v0.42.51.0). Non-fatal for most ops (logged, re-walk) but FATAL for sync: the
+  sync-target pin write aborts EVERY incremental sync ("imported 0 of N",
+  reason=checkpoint_unavailable) so the brain silently goes stale; it also
+  corrupts extract-conversation-facts / enrich / extract --by-mention
+  checkpoints. Verified live on Supabase (postgres.js 3.4.9): the current binding
+  stores a string scalar; to_jsonb($3::text[]) with the raw array stores a proper
+  array. This is the UPSTREAM-CONVERGENT fix (mirrors the in-file appendCompleted
+  unnest($3::text[]) precedent + PRs #2355/#2333/#2328/#2309); gbrain's PGLite CI
+  default hides the bug so it ships unfixed on master. Applied as a TIME-BOXED
+  bridge written identical to the upstream fix so it self-obsoletes when master
+  lands it.
+reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
+deprecate_when: "garrytan/gbrain merges any of the convergent recordCompleted fixes (#2355/#2351/#2350/#2333/#2328/#2309 et al.) so master no longer binds JSON.stringify(sorted) to a $3::jsonb cast in recordCompleted. The still_needed_probe detects this automatically every upgrade (broken pair gone => OBSOLETE); on the GBRAIN_REF bump that carries the fix, RETIRE this patch (drop the patch triple + its Dockerfile RUN + the verify-upgrade DRIFT block)."
+added: "2026-06-22"
+last_validated_ref: "gbrain@bb2e88c"
+upstream: garrytan/gbrain
