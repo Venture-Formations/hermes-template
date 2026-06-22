@@ -92,15 +92,20 @@ ENV PATH="/usr/local/bun/bin:$PATH"
 # gbrain ships via master (no GitHub release tags), so we pin a specific master
 # commit for reproducible builds. Bumping this ARG also busts Docker's layer
 # cache for the install below, forcing a fresh pull on upgrade.
-# Current: v0.42.51.0 — master @ 2026-06-17, commit 9bf96db (#2255 sync reliability:
-# contention-free page-clock v118, op_checkpoints scalar-guard v119, honest sync
-# freshness). All 22 core patches re-validated STILL-NEEDED via still_needed_probe;
-# 0 obsoleted, 0 anchor conflicts (touches doctor/sync/migrate/op-checkpoint/
-# query-cache — none are our patch anchors). Bumped to FIX the live op_checkpoints
-# scalar corruption on extract-conversation-facts (v119 repair + loader guard).
+# Current: v0.42.52.0 — master @ 2026-06-21, commit bb2e88c (#2287 reliability:
+# autopilot dead-job storm + supervisor wedge + sync/status/minion reliability —
+# directly hardens the autopilot/supervisor crash-refork class behind the
+# 2026-06-22 PID-exhaustion incident). All 25 core patches re-validated
+# STILL-NEEDED via still_needed_probe; 0 obsoleted, 0 anchor conflicts confirmed
+# on a LINUX dry-run (tools/gbrain-bump-dryrun.sh on-container). The dry-run's
+# alphabetical apply order spuriously REDs gbrain-grok-recipe (it must run AFTER
+# gbrain-no-anthropic-reroute, as the Dockerfile orders it) — identical false RED
+# at the prior ref, so NOT a bb2e88c conflict. Does NOT fix the op_checkpoints
+# recordCompleted jsonb-array sync bug (op-checkpoint.ts byte-identical to 9bf96db)
+# — that needs the separate FIX-OCK-1 patch / an upstream merge.
 # To upgrade: set GBRAIN_REF to the new master sha, push this branch, then run
 # `gbrain post-upgrade` + verify-upgrade.sh on the container (UPGRADING_GBRAIN.md §0).
-ARG GBRAIN_REF=9bf96db807c2f050449142f2f0b05726f58e5054
+ARG GBRAIN_REF=bb2e88c42a4969e16df7a43a9eb118aa031e89a4
 RUN curl -fsSL https://bun.sh/install | bash && \
     bun install -g github:garrytan/gbrain#${GBRAIN_REF} && \
     # Smoke check — fail the build loudly if the gbrain ref is unresolvable

@@ -61,5 +61,5 @@ deprecate_when: >
   valid knob). The still_needed_probe detects an upstream gate automatically
   every upgrade.
 added: "2026-06-11"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 upstream: garrytan/gbrain

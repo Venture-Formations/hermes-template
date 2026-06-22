@@ -123,5 +123,5 @@ deprecate_when: >
   anchor-splice") or RETIRE if upstream fixed it. The still_needed_probe checks whether
   the bare-child anchor/comment is gone and a merge is present.
 added: "2026-06-13"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 upstream: garrytan/gbrain

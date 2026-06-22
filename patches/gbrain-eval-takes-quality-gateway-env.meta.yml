@@ -46,5 +46,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain fixes the configureGateway call in src/commands/eval-takes-quality.ts to pass a defined env map (e.g. `env: { ...process.env }`, mirroring eval-cross-modal.ts), so the takes-quality eval no longer crashes INCONCLUSIVE on undefined env. The still_needed_probe checks the buggy top-level-spread presence every upgrade."
 added: "2026-06-16"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 upstream: garrytan/gbrain

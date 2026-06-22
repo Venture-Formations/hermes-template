@@ -49,5 +49,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain makes the `gbrain eval cross-modal` DEFAULT_SLOTS provider-agnostic / drops the native openai:gpt-4o + google:gemini-1.5-pro defaults (e.g. routes defaults through a single configurable model knob), so a default run no longer bills a native OpenAI/Google key. The still_needed_probe checks the DEFAULT_SLOTS native-id presence every upgrade. NOT filed upstream — VF-only fork patch."
 added: "2026-06-15"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 upstream: garrytan/gbrain

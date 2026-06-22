@@ -41,5 +41,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain prefixes the voice-gate judge id itself (e.g. `anthropic:claude-haiku-4-5`), OR gbrain goes provider-agnostic / adds a global route knob so a bare id no longer throws in parseModelId. The still_needed_probe checks for the bare `claude-haiku-4-5` literal every upgrade."
 added: "2026-06-17"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 upstream: garrytan/gbrain

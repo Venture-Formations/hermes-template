@@ -55,5 +55,5 @@ why: >
 reapply: docker-build      # idempotent; re-runs after the gbrain install on every GBRAIN_REF bump
 deprecate_when: "garrytan/gbrain prices grok/xai natively in a map the chat lookup reaches (CANONICAL_PRICING / anthropic-pricing.ts gains a grok/xai key — the probe detects it), OR gbrain adds grok/xai to one of its own FREE_*_PROVIDERS sets, OR the 'recipe-cost-driven resolution' v0.41+ TODO lands so the grok recipe's advisory cost_per_1m_*_usd:0 feeds lookupPricing, OR the operator stops routing gbrain through grok (FIX-GROK-1 retired), OR brainstorm/capped phases gain a documented uncapped path."
 added: "2026-06-14"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 upstream: garrytan/gbrain

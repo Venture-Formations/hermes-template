@@ -29,7 +29,7 @@ why: >
 reapply: docker-build
 deprecate_when: "garrytan/gbrain gates verb inference by endpoint type upstream (e.g. FIX-TE-1 lands), making source pages mentions-only natively"
 added: "2026-06-05"
-last_validated_ref: "gbrain@9bf96db"
+last_validated_ref: "gbrain@bb2e88c"
 anchor_verified: "2026-06-05: media-guard `if (pageType === 'media') {` at src/core/link-extraction.ts:684, inside `export function inferLinkType(...)` (:683); the 3-line media block (684-686) the perl splice matches is present verbatim in garrytan/gbrain@099d9a8 (805814451ec9)."
 upstream: garrytan/gbrain
 # UPSTREAM CANDIDATE: partial. The narrow source-exclusion is patch-safe to
