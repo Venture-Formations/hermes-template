@@ -1,0 +1,84 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+# source_sha is the real sha256 of the .sh body; re-run gen-modifications.ts if you edit it.
+
+id: gbrain-dir-pattern-owned-dirs
+title: "Add products|publications to link-extraction DIR_PATTERN so the prose-first owned namespaces are edge-producing (FIX-DP-1)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-dir-pattern-owned-dirs.sh
+source_sha: "115354b03e0cd513656763d5a7e25164873e4d73eb8ef31cc3eddf9709a22906"
+
+anchor: "const DIR_PATTERN = '(?:people|companies|meetings|concepts"
+anchor_verified_at_pin: true
+anchor_file_line: "src/core/link-extraction.ts:86 (gbrain@bb2e88c / v0.42.52.0)"
+
+invariant: >
+  After the patch, DIR_PATTERN contains products|publications, so a
+  [[products/<slug>]] and a [[publications/<slug>]] wikilink each produce a
+  source->entity edge (link-extraction's markdown/wikilink regexes accept the
+  prefix). people|companies|concepts|tech|media stay edge-producing (unchanged).
+
+still_needed_probe: patches/gbrain-dir-pattern-owned-dirs.probe.sh
+
+target_files:
+  - "gbrain src/core/link-extraction.ts:86 (DIR_PATTERN alternation; appends |products|publications before the closing group)"
+
+why: >
+  DIR_PATTERN is the closed alternation of directory prefixes link-extraction
+  accepts when turning a markdown link / [[wikilink]] into a source->entity edge.
+  Only a prefix in this pattern produces an edge. The prose-first overhaul (A1b)
+  owns two new entity namespaces that must be edge-producing: products/ (product
+  pages) and publications/ (publication pages). Verified at the pin, DIR_PATTERN
+  already contains people|companies|concepts|tech|media but NOT
+  products|publications, so [[products/cursor]] / [[publications/zero-to-one]]
+  would silently fail to link. This appends exactly those two tokens. Stage-3
+  routes synthesis on frontmatter.type, so the directory only needs to be
+  edge-producing — nothing else about type resolution depends on this. The splice
+  is scoped to the known tail 'openclaw|entities)' and is idempotent.
+
+reapply: docker-build    # idempotent perl splice; re-runs after the gbrain install on every GBRAIN_REF bump
+
+deprecate_when: >
+  garrytan/gbrain adds products and publications to DIR_PATTERN upstream (or makes
+  the prefix set pack-derived). At that point the splice becomes a no-op (the
+  idempotency grep matches) and the patch can be retired.
+
+added: "2026-06-26"
+last_validated_ref: "gbrain@bb2e88c"
+upstream: garrytan/gbrain
+
+undo: |
+  1. Delete patches/gbrain-dir-pattern-owned-dirs.sh + .meta.yml + .probe.sh.
+  2. Remove the `RUN bash /app/patches/gbrain-dir-pattern-owned-dirs.sh && \`
+     line from the hermes-template Dockerfile (deploy/venture-formations-fork).
+  3. In hermes-workspace: bun run tools/gen-modifications.ts && --check.
+  4. Commit/push -> Railway rebuild. The new image's DIR_PATTERN drops the two
+     dirs; [[products/x]]/[[publications/x]] links stop producing edges (existing
+     edges remain until the next `gbrain extract links` re-run).
+
+redo: |
+  Docker build re-applies automatically (the Dockerfile RUN line runs the .sh
+  right after `bun install -g github:garrytan/gbrain#${GBRAIN_REF}` on every bump;
+  the script no-ops if products|publications is already present). Manual on a live
+  container (reverted on next rebuild): railway ssh "... bash .../gbrain-dir-pattern-owned-dirs.sh".
+
+upgrade_eval: |
+  After each GBRAIN_REF bump:
+  1. ANCHOR CHECK: grep -nF "const DIR_PATTERN = '(?:people|companies|meetings|concepts" \
+       /usr/local/bun/install/global/node_modules/gbrain/src/core/link-extraction.ts
+     Expect exactly one hit. If gone, the patch fails the Docker build (old
+     container keeps serving); re-point the anchor/tail in the .sh.
+  2. UPSTREAM CHECK: grep -E "products\|publications" the same file — if gbrain
+     added them natively, retire per deprecate_when.
+  3. INVARIANT: confirm the final DIR_PATTERN line contains
+     ...|openclaw|entities|products|publications).
+
+rollback_speed: |
+  FAIL-SAFE: an absent anchor at Docker build time exits non-zero -> the build
+  FAILS and Railway keeps the previous image running (zero outage). For a
+  behavioural revert: drop the Dockerfile RUN line and push; ~3-5 min rebuild.
+
+# UPSTREAM CANDIDATE: maybe — a generic "owned/extension dirs" config for
+# DIR_PATTERN would remove the need for per-fork prefix patches.
