@@ -234,6 +234,14 @@ RUN bash /app/patches/gbrain-enrich-cli-prompt-twin.sh && \
 RUN bash /app/patches/gbrain-link-type-endpoint-gate.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-dir-pattern-owned-dirs (FIX-DP-1) ----------------
+# Adds products|publications to link-extraction DIR_PATTERN so the prose-first owned
+# namespaces (products/, publications/) are edge-producing (overhaul A1b). Self-auditing:
+# EXITS NON-ZERO and FAILS THE BUILD (old container keeps serving) if the anchor moves.
+# See patches/gbrain-dir-pattern-owned-dirs.meta.yml.
+RUN bash /app/patches/gbrain-dir-pattern-owned-dirs.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch: gbrain-timeline-writer-fixes (FIX-TL-1/2/4) --------------
 # timeline date from source published_at; back-edges -> ## Mentions; ## Timeline sorted DESC. MUST run after TL-3. Self-auditing: EXITS NON-ZERO and FAILS THE BUILD (old container
 # keeps serving) if an anchor moves. See patches/gbrain-timeline-writer-fixes.meta.yml.
