@@ -3,47 +3,58 @@
 # source_sha is the real sha256 of the .sh body; re-run gen-modifications.ts if you edit it.
 
 id: gbrain-dir-pattern-owned-dirs
-title: "Add products|publications to link-extraction DIR_PATTERN so the prose-first owned namespaces are edge-producing (FIX-DP-1)"
+title: "Add products|publications|episodes|sources to link-extraction DIR_PATTERN so the prose-first owned namespaces are edge-producing (FIX-DP-1; folds in FIX-LD-1)"
 category: gbrain-core
 risk: red
 repo: hermes-template
 source: patches/gbrain-dir-pattern-owned-dirs.sh
-source_sha: "115354b03e0cd513656763d5a7e25164873e4d73eb8ef31cc3eddf9709a22906"
+source_sha: "e596074ab5aa2352ac1f1049eee6824ef8c30c86591437f0118deb650b21d03a"
 
 anchor: "const DIR_PATTERN = '(?:people|companies|meetings|concepts"
 anchor_verified_at_pin: true
 anchor_file_line: "src/core/link-extraction.ts:86 (gbrain@bb2e88c / v0.42.52.0)"
 
 invariant: >
-  After the patch, DIR_PATTERN contains products|publications, so a
-  [[products/<slug>]] and a [[publications/<slug>]] wikilink each produce a
+  After the patch, DIR_PATTERN ends ...|openclaw|entities|products|publications|episodes|sources)
+  and still compiles as a RegExp, so a [[products/<slug>]], [[publications/<slug>]],
+  [[episodes/<prov>/<id>]] and [[sources/<prov>/<id>]] wikilink each produce a
   source->entity edge (link-extraction's markdown/wikilink regexes accept the
   prefix). people|companies|concepts|tech|media stay edge-producing (unchanged).
 
 still_needed_probe: patches/gbrain-dir-pattern-owned-dirs.probe.sh
 
 target_files:
-  - "gbrain src/core/link-extraction.ts:86 (DIR_PATTERN alternation; appends |products|publications before the closing group)"
+  - "gbrain src/core/link-extraction.ts:86 (DIR_PATTERN alternation; appends |products|publications|episodes|sources before the closing group)"
 
 why: >
   DIR_PATTERN is the closed alternation of directory prefixes link-extraction
   accepts when turning a markdown link / [[wikilink]] into a source->entity edge.
-  Only a prefix in this pattern produces an edge. The prose-first overhaul (A1b)
-  owns two new entity namespaces that must be edge-producing: products/ (product
-  pages) and publications/ (publication pages). Verified at the pin, DIR_PATTERN
-  already contains people|companies|concepts|tech|media but NOT
-  products|publications, so [[products/cursor]] / [[publications/zero-to-one]]
-  would silently fail to link. This appends exactly those two tokens. Stage-3
-  routes synthesis on frontmatter.type, so the directory only needs to be
-  edge-producing — nothing else about type resolution depends on this. The splice
-  is scoped to the known tail 'openclaw|entities)' and is idempotent.
+  Only a prefix in this pattern produces an edge. The prose-first overhaul owns
+  FOUR namespaces that must be edge-producing but that DIR_PATTERN does not
+  whitelist (it ships `source` SINGULAR plus our tech|finance|personal|openclaw|entities
+  extensions): products/ + publications/ (company build, A1b — FIX-DP-1), and
+  episodes/ + sources/ PLURAL (person build — folds in the standalone FIX-LD-1).
+  Without them [[products/cursor]] / [[publications/zero-to-one]] and — the
+  person→episode edge gap — the builders' hundreds of [[episodes/youtube/<id>|..]]
+  / [[sources/snipd/<id>|..]] Timeline+Sources wikilinks all silently fail to link
+  (the no-gate generic pass only fires for BARE [[name]] refs and only with
+  link_resolution.global_basename enabled, which it is not), so synthesized
+  people/companies form no edges to the episodes evidencing them (~488 of ~842
+  people, those legacy snipd appeared_in not builder refs). This appends all four
+  tokens. Stage-3 routes synthesis on frontmatter.type, so the directory only needs
+  to be edge-producing — nothing else about type resolution depends on this. The
+  splice is scoped to the known tail 'openclaw|entities)', compiles-checked, and
+  idempotent. episodes|sources folds in FIX-LD-1 so ONE patch owns this line.
 
 reapply: docker-build    # idempotent perl splice; re-runs after the gbrain install on every GBRAIN_REF bump
 
 deprecate_when: >
-  garrytan/gbrain adds products and publications to DIR_PATTERN upstream (or makes
-  the prefix set pack-derived). At that point the splice becomes a no-op (the
-  idempotency grep matches) and the patch can be retired.
+  garrytan/gbrain adds ALL of products, publications, episodes and sources to
+  DIR_PATTERN upstream (or makes the prefix set pack-derived) — unlikely, these are
+  our collector/overhaul conventions. The still_needed_probe detects it each upgrade
+  (all four present => OBSOLETE). Until then this is a permanent fork extension; on
+  any upgrade that MOVES or RESHAPES the DIR_PATTERN constant, re-point the anchor/
+  tail (preserving upstream's dirs) rather than retiring.
 
 added: "2026-06-26"
 last_validated_ref: "gbrain@bb2e88c"
@@ -54,14 +65,14 @@ undo: |
   2. Remove the `RUN bash /app/patches/gbrain-dir-pattern-owned-dirs.sh && \`
      line from the hermes-template Dockerfile (deploy/venture-formations-fork).
   3. In hermes-workspace: bun run tools/gen-modifications.ts && --check.
-  4. Commit/push -> Railway rebuild. The new image's DIR_PATTERN drops the two
-     dirs; [[products/x]]/[[publications/x]] links stop producing edges (existing
-     edges remain until the next `gbrain extract links` re-run).
+  4. Commit/push -> Railway rebuild. The new image's DIR_PATTERN drops the four
+     dirs; [[products/x]]/[[publications/x]]/[[episodes/x]]/[[sources/x]] links stop
+     producing edges (existing edges remain until the next `gbrain extract links` re-run).
 
 redo: |
   Docker build re-applies automatically (the Dockerfile RUN line runs the .sh
   right after `bun install -g github:garrytan/gbrain#${GBRAIN_REF}` on every bump;
-  the script no-ops if products|publications is already present). Manual on a live
+  the script no-ops if products|publications|episodes|sources is already present). Manual on a live
   container (reverted on next rebuild): railway ssh "... bash .../gbrain-dir-pattern-owned-dirs.sh".
 
 upgrade_eval: |
@@ -70,10 +81,10 @@ upgrade_eval: |
        /usr/local/bun/install/global/node_modules/gbrain/src/core/link-extraction.ts
      Expect exactly one hit. If gone, the patch fails the Docker build (old
      container keeps serving); re-point the anchor/tail in the .sh.
-  2. UPSTREAM CHECK: grep -E "products\|publications" the same file — if gbrain
-     added them natively, retire per deprecate_when.
+  2. UPSTREAM CHECK: grep -F "products|publications|episodes|sources" the same file
+     — if gbrain added them natively, retire per deprecate_when.
   3. INVARIANT: confirm the final DIR_PATTERN line contains
-     ...|openclaw|entities|products|publications).
+     ...|openclaw|entities|products|publications|episodes|sources).
 
 rollback_speed: |
   FAIL-SAFE: an absent anchor at Docker build time exits non-zero -> the build

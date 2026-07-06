@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # still_needed_probe for FIX-DP-1 (gbrain-dir-pattern-owned-dirs).
-# Answers per upgrade: does DIR_PATTERN STILL lack products|publications upstream?
-# If gbrain added them natively, this patch is obsolete.
+# Answers per upgrade: does DIR_PATTERN STILL lack products|publications|episodes|sources
+# upstream? If gbrain added all four natively, this patch is obsolete.
 # Exit 0 = still needed, 1 = obsolete (recommend retire), 2 = unknown.
 set -uo pipefail
 GBRAIN_SRC=""
@@ -29,5 +29,5 @@ fi
 # from our splice here; so the probe stays conservative = STILL NEEDED unless the
 # anchor is gone. Retirement is decided by upgrade_eval step 2 against a pristine
 # checkout, not this on-container probe.)
-echo "[dp1-probe] STILL NEEDED: DIR_PATTERN anchor present; products|publications are not in upstream gbrain (confirm against a pristine checkout at upgrade time per upgrade_eval step 2)."
+echo "[dp1-probe] STILL NEEDED: DIR_PATTERN anchor present; products|publications|episodes|sources are not in upstream gbrain (confirm against a pristine checkout at upgrade time per upgrade_eval step 2)."
 exit 0
