@@ -1,0 +1,133 @@
+# Source-of-truth metadata for a gbrain-core modification.
+# Read by hermes-workspace/tools/gen-modifications.ts -> MODIFICATIONS.md.
+# source_sha below is the real sha256 of the .sh body. If you edit the .sh, re-run
+# `bun tools/gen-modifications.ts` (the pre-commit --check gate fails on mismatch).
+
+id: gbrain-link-type-page-role-prior
+title: "Disable the page-wide role prior in inferLinkType — stop mass-mistyping company mentions as works_at/invested_in/advises (FIX-TE-3)"
+category: gbrain-core
+risk: red
+repo: hermes-template
+source: patches/gbrain-link-type-page-role-prior.sh
+source_sha: "90ce2f75a63164115818d3485e2e00d9829066d41eb085d83a591fe7060b84a2"
+
+# anchor: the exact page-role-prior `if (...)` line, unique inside inferLinkType.
+# The patch body checks it present (fails the Docker build if gone).
+anchor: "if (pageType === 'person' && globalContext && targetSlug?.startsWith('companies/')) {"
+anchor_verified_at_pin: true
+anchor_file_line: "src/core/link-extraction.ts:756 (gbrain@bb2e88c)"
+
+# invariant: verify-upgrade.sh (or a manual bun call) asserts the page-role prior
+# no longer types a NEUTRAL company mention on a role-heavy page, while the LOCAL
+# sentence-context verbs and the FIX-TE-1 endpoint guard stay intact.
+#
+# Testable form (imports the patched inferLinkType + its one runtime dep text-safe.ts):
+#   bun -e "
+#     import { inferLinkType } from '/usr/local/bun/install/global/node_modules/gbrain/src/core/link-extraction.ts';
+#     const ROLE_PAGE = 'Jane is the CEO of Acme. She discussed Anthropic and OpenAI at length.';
+#     const cases = [
+#       ['person','she discussed their model', ROLE_PAGE, 'companies/anthropic','mentions'], // fixed (was works_at)
+#       ['person','she works at Stripe now',   undefined, 'companies/stripe',   'works_at'],  // local positive intact
+#       ['person','she founded the startup',   undefined, 'companies/acme2',    'founded'],   // local positive intact
+#       ['person','works at Acme',             undefined, 'people/bob',         'mentions'],   // FIX-TE-1 guard intact
+#     ];
+#     for (const [pt,ctx,gc,ts,exp] of cases) {
+#       const got = inferLinkType(pt,ctx,gc,ts);
+#       if (got !== exp) { console.error('FAIL', ts, 'got', got, 'exp', exp); process.exit(1); }
+#     }
+#     console.log('OK: page-role prior disabled, local verbs + endpoint guard intact');
+#   "
+invariant: >
+  inferLinkType(pageType='person', context='she discussed their model',
+  globalContext='Jane is the CEO of Acme. She discussed Anthropic at length.',
+  targetSlug='companies/anthropic') returns 'mentions' (NOT 'works_at');
+  inferLinkType(pageType='person', context='she works at Stripe now',
+  globalContext=undefined, targetSlug='companies/stripe') returns 'works_at'
+  (local sentence-context positive intact);
+  inferLinkType(pageType='person', context='works at Acme', globalContext=undefined,
+  targetSlug='people/bob') returns 'mentions' (FIX-TE-1 endpoint guard intact).
+
+still_needed_probe: patches/gbrain-link-type-page-role-prior.probe.sh
+
+target_files:
+  - "gbrain src/core/link-extraction.ts (inferLinkType page-role prior block; comments out the three globalContext-tested returns)"
+
+why: >
+  inferLinkType's final layer is a PAGE-ROLE PRIOR that tests the WHOLE-PAGE text
+  (globalContext), not the per-link context window: for a person->company link,
+  if PARTNER_ROLE_RE / ADVISOR_ROLE_RE / EMPLOYEE_ROLE_RE matches ANYWHERE on the
+  page it returns invested_in / advises / works_at. On the prose-first person
+  pages (each discusses dozens of companies) one role phrase makes EVERY company
+  the page merely mentions an employment/investment edge. Measured 2026-07-06 on
+  the Venture-Formations brain: 2,873 works_at edges are link_source='markdown'
+  (co-occurrence) vs 28 link_source='frontmatter' (curated company: projection);
+  people/jason-lemkin "works_at" 31 companies incl. Anthropic/OpenAI/SpaceX/China/
+  Monaco (works at ONE: SaaStr); companies/cursor "works_at" Sam Bankman-Fried.
+  This polluted the 2-hop first-party derivation in the product/company page
+  builders (a page's first-party Timeline tags fired from VCs merely DISCUSSING
+  the entity) and degrades gbrain's own relational search ("who works at X").
+  This patch DISABLES the page-role prior. What remains is precise: the LOCAL
+  sentence-context verb regexes above the prior (FOUNDED_RE/INVESTED_RE/ADVISES_RE/
+  WORKS_AT_RE on the 240-char `context`) are untouched, and the authoritative
+  employer/investor edges from FRONTMATTER (company:/investors:/key_people:) are
+  untouched. Neutral company mentions now correctly return 'mentions'.
+  Behaviorally proven before/after 2026-07-06 (see invariant).
+
+reapply: docker-build    # idempotent perl splice; re-runs after the gbrain install on every GBRAIN_REF bump
+
+deprecate_when: >
+  garrytan/gbrain either removes the page-role prior or reworks it to test the
+  per-link context window instead of globalContext (so page-level role signal no
+  longer drives link-level typing). The still_needed_probe detects the stock
+  prior's absence and exits 3 to flag review.
+
+added: "2026-07-06"
+last_validated_ref: "gbrain@bb2e88c"
+upstream: garrytan/gbrain
+
+# ── REQUIRED OPERATOR DOCUMENTATION ─────────────────────────────────────────
+
+undo: |
+  To restore stock gbrain behaviour (page-role prior re-enabled):
+  1. Delete patches/gbrain-link-type-page-role-prior.{sh,meta.yml,probe.sh}.
+  2. Remove the RUN line executing this patch from the hermes-template Dockerfile
+     (branch deploy/venture-formations-fork).
+  3. In hermes-workspace: `bun run tools/gen-modifications.ts` then
+     `bun run tools/gen-modifications.ts --check` (must pass); commit.
+  4. Push → Railway rebuild → new image ships stock inferLinkType (old container
+     serves until promotion; zero outage).
+  Effect: the next `gbrain extract links` run re-mints the page-wide works_at/
+  invested_in/advises pollution. The product/company builders are UNAFFECTED
+  either way (they filter link_source NOT IN ('markdown','wikilink-resolved')).
+
+redo: |
+  Docker build re-applies automatically after `bun install -g gbrain#${GBRAIN_REF}`
+  on every ref bump (idempotent; FIX-TE-3 sentinel → no-op if present). Manual
+  in-place application on a running container is reverted on the next rebuild.
+
+upgrade_eval: |
+  After each GBRAIN_REF bump:
+  1. ANCHOR CHECK — the page-role prior line must be present and unique:
+       grep -cF "if (pageType === 'person' && globalContext && targetSlug?.startsWith('companies/')) {" \
+         /usr/local/bun/install/global/node_modules/gbrain/src/core/link-extraction.ts
+     Expected 1 (pre-patch) — if 0, gbrain refactored the prior; the patch fails
+     the build (old container serves). Re-point the anchor + block in the .sh.
+  2. UPSTREAM FIX CHECK — run the still_needed_probe; exit 3 = review for deprecation.
+  3. INVARIANT RE-CONFIRM — run the inline bun assertion from `invariant` above.
+  4. LOCAL-VERB REGRESSION — confirm the sentence-context positive path survives:
+       grep -qF "if (WORKS_AT_RE.test(context)) return 'works_at';" <file> && echo OK
+
+rollback_speed: |
+  FAIL-SAFE: anchor absent at build time → patch exits non-zero → Docker build
+  FAILS → Railway keeps the PREVIOUS image running (zero outage). For a post-build
+  behavioral regression: revert the Dockerfile RUN-line commit and push; Railway
+  rebuilds in ~3-5 min; the running container serves until promotion. No DB
+  compensation needed to roll back (re-enabling the prior re-mints edges on the
+  next extract; the builders ignore them regardless).
+
+# UPSTREAM CANDIDATE: YES.
+# The correct long-term fix is a garrytan/gbrain change that tests the per-link
+# context window (not globalContext) for the role prior, or drops it in favor of
+# frontmatter-authoritative employer edges. Until that lands, this patch is the
+# local bridge. Pairs with FIX-TE-1 (endpoint gate) and FIX-TE-2 (source pages
+# mentions-only) as the inferLinkType false-positive suppression set.

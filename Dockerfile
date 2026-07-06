@@ -234,6 +234,16 @@ RUN bash /app/patches/gbrain-enrich-cli-prompt-twin.sh && \
 RUN bash /app/patches/gbrain-link-type-endpoint-gate.sh && \
     gbrain --version
 
+# --- VF gbrain CORE patch: gbrain-link-type-page-role-prior (FIX-TE-3) -------------
+# Disables inferLinkType's PAGE-WIDE role prior: it tested globalContext (the whole
+# person page), so one role phrase typed EVERY company the page merely mentioned as
+# works_at/invested_in/advises (2873 markdown works_at vs 28 frontmatter; lemkin
+# "works_at" 31 companies). Local sentence-context verbs + frontmatter edges intact.
+# Self-auditing: FAILS THE BUILD (old container serves) if the prior anchor moves.
+# See patches/gbrain-link-type-page-role-prior.meta.yml.
+RUN bash /app/patches/gbrain-link-type-page-role-prior.sh && \
+    gbrain --version
+
 # --- VF gbrain CORE patch: gbrain-dir-pattern-owned-dirs (FIX-DP-1) ----------------
 # Adds products|publications to link-extraction DIR_PATTERN so the prose-first owned
 # namespaces (products/, publications/) are edge-producing (overhaul A1b). Self-auditing:
